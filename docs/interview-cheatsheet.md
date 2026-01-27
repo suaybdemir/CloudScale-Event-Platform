@@ -170,3 +170,18 @@ PartitionKey = "{TenantId}:{yyyy-MM}"
 - Already have Kafka expertise
 - Event sourcing architecture
 - Extremely high throughput (>1M msg/sec)
+
+---
+
+## Q11: "How does the Self-Healing Feedback Loop work?"
+
+**Answer:**
+It's a biological system mimicry (Homeostasis):
+
+1.  **Sense**: `BackpressureMonitor` reads Service Bus queue depth.
+2.  **Decide**: If depth > 10k, system is "Overloaded".
+3.  **Signal**: Updates `system:health` state in Cosmos DB (Single Source of Truth).
+4.  **Act**: Ingestion API reads state (cached 10s) and switches to "Defensive Mode" (429 Throttling).
+
+**Result**: We sacrifice some availability (429s) to save durability (preventing crash).
+

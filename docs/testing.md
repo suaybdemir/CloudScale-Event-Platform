@@ -82,6 +82,7 @@ dotnet test tests/CloudScale.Integration.Tests
 | `load_test_stable.py` | Sustained load | 1000 RPS / 60s |
 | `load_test_batch.py` | Batch ingestion | 10k events/batch |
 | `load_test_10k.py` | Peak capacity | 10k RPS |
+| `stress_test.py` | Extreme Stress | Dynamic Ramp-up + Chaos |
 | `test_rate_limiting.py` | Rate limit validation | 150 burst |
 
 ### Running Load Tests

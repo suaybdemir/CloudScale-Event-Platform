@@ -166,7 +166,47 @@ Config: 10,000 requests/minute
 
 ---
 
-## 7. Partition Key: TenantId:yyyy-MM
+## 7. Storage Strategy: Hot vs Cold Separation
+
+### Decision: Hybrid Model (Cosmos DB + Blob Archive)
+
+| Feature | Hot (Cosmos DB) | Cold (Blob Storage) |
+|---------|-----------------|---------------------|
+| **Cost** | High ($$$) | Low ($) |
+| **Performance** | Millisecond Latency | Minutes/Hours |
+| **Purpose** | Real-time Dashboard | Audit & Analytics |
+| **Retention** | 30 Days (TTL) | 7 Years |
+
+### Why Hybrid?
+1.  **Cost Efficiency**: Storing 7 years of data in Cosmos DB is prohibitively expensive.
+2.  **Performance**: Keeping the active dataset small keeps Cosmos DB queries fast.
+3.  **Compliance**: Blob Storage offers immutable WORM (Write Once Read Many) policies for audit trails.
+
+---
+
+## 8. Compute Runtime: .NET 10
+
+### Decision: Upgrade from .NET 8 to .NET 10 (Preview)
+
+### Why Bleeding Edge?
+1.  **Performance**: Significant improvements in LINQ and JSON serialization speed.
+2.  **AOT Readiness**: Native AOT support is mature, drastically reducing container startup time (vital for scaling).
+3.  **Future Proofing**: Aligning with the LTS roadmap early prevents technical debt.
+
+---
+
+## 9. Rate Limiting: Static vs Adaptive
+
+### Decision: Adaptive Feedback Loop
+
+Instead of just static limits (e.g., 1000/min), we implemented **System Aware Throttling**.
+
+*   **Mechanism**: `EventProcessor` monitors queue depth. If it spikes, it signals the API to reject traffic.
+*   **Trade-off**: Slightly higher code complexity vs. massive resilience gain against cascading failures.
+
+---
+
+## 10. Partition Key: TenantId:yyyy-MM
 
 ### Decision: Composite key with tenant + month
 

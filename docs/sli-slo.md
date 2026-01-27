@@ -13,6 +13,8 @@ This document defines the Service Level Indicators (SLIs), Service Level Objecti
 | **Processing Latency** | Time from message receive to Cosmos DB write | `cloudscale_processing_duration_seconds` p99 |
 | **Throughput** | Events successfully ingested per minute | `rate(cloudscale_events_ingested_total[1m])` |
 | **Fraud Detection Accuracy** | True positive rate for fraud detection | Manual audit sampling |
+| **Durability (Cold Store)** | Success rate of Blob Storage archival | `archival_success / total_processed` |
+| **Capacity Saturation** | Percentage of requests throttled (429) | `429_responses / total_requests` |
 
 ## Service Level Objectives (SLOs)
 
