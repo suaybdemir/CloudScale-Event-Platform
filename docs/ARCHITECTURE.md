@@ -74,7 +74,7 @@ graph TD
     Health -.->|1. Monitor Queue Depth| SB
     Health -.->|2. Update Health State| Cosmos
     Cosmos -.->|3. Read Pressure State| API
-    API -.->|4. Throttling (429)| Throttling
+    API -.->|4. Throttling Status 429| Throttling
     
     %% Legend
     linkStyle 10,11,12,13 stroke:#D32F2F,stroke-width:3px;
