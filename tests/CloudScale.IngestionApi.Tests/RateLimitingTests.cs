@@ -16,11 +16,18 @@ public class RateLimitingTests
         _loggerMock = new Mock<ILogger<RateLimitingMiddleware>>();
         _configMock = new Mock<IConfiguration>();
         
-        // Setup default config values to emulate appsettings
-        var configSectionMock = new Mock<IConfigurationSection>();
-        configSectionMock.Setup(x => x.Value).Returns("10000"); // Default Global Limit
+        // Setup config values explicitly to prevent "10000" override
+        SetupConfig("RateLimiting:BurstCapacity", "100");
+        SetupConfig("RateLimiting:TokensPerSecond", "10");
+        SetupConfig("RateLimiting:GlobalPermitLimit", "10000");
+    }
 
-        _configMock.Setup(x => x.GetSection(It.IsAny<string>())).Returns(configSectionMock.Object);
+    private void SetupConfig(string key, string value)
+    {
+        var section = new Mock<IConfigurationSection>();
+        section.Setup(x => x.Value).Returns(value);
+        section.Setup(x => x.Path).Returns(key);
+        _configMock.Setup(x => x.GetSection(key)).Returns(section.Object);
     }
 
     [Fact]
