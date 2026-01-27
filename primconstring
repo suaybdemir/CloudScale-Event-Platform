@@ -1,0 +1,9 @@
+Service Bus Connection String
+
+Endpoint=sb://cloudscale-sb-123.servicebus.windows.net/;SharedAccessKeyName=RootManageSharedAccessKey;SharedAccessKey=cMQJBCtc/JTtK1qROwVdvDzgm6BR9zI3n+ASbFEwIsU=
+
+
+cosmosdb
+
+uri:https://cloudscale-rg-db.documents.azure.com:443/
+primarykey:DF4PzXFuWPkNrNcy1YFbDntdC3d9X4dwBvCwVzOLVS2fzDlG8PJfgP2VK08vq1Uu8oLaJsTjDIyAACDbT1kePg==

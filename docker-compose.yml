@@ -1,0 +1,141 @@
+services:
+  cosmosdb-emulator:
+    image: mcr.microsoft.com/cosmosdb/linux/azure-cosmos-emulator:latest
+    container_name: cosmosdb-emulator
+    ports:
+      - "8081:8081"
+      - "10251-10255:10251-10255"
+    environment:
+      - AZURE_COSMOS_EMULATOR_PARTITION_COUNT=1
+      - AZURE_COSMOS_EMULATOR_ENABLE_DATA_PERSISTENCE=false
+      - AZURE_COSMOS_EMULATOR_IP_ADDRESS_OVERRIDE=0.0.0.0
+    healthcheck:
+      test: ["CMD", "curl", "-k", "-f", "https://localhost:8081/_explorer/emulator.pem"]
+      interval: 10s
+      timeout: 30s
+      retries: 50
+      start_period: 120s
+    networks:
+      - cloudscale-network
+    restart: always
+
+  servicebus-emulator:
+    image: mcr.microsoft.com/azure-messaging/servicebus-emulator:latest
+    container_name: servicebus-emulator
+    ports:
+      - "5672:5672"
+      - "80:80"
+    environment:
+      - ACCEPT_EULA=Y
+      - SQL_SERVER=sqledge
+      - MSSQL_SA_PASSWORD=CloudScale@2024!
+    depends_on:
+      - sqledge
+    volumes:
+      - ./ServiceBusConfig.json:/ServiceBus_Emulator/ConfigFiles/Config.json
+    networks:
+      - cloudscale-network
+    restart: always
+
+  sqledge:
+    image: mcr.microsoft.com/azure-sql-edge:latest
+    container_name: sqledge
+    environment:
+      - ACCEPT_EULA=Y
+      - MSSQL_SA_PASSWORD=CloudScale@2024!
+    networks:
+      - cloudscale-network
+    restart: always
+
+  azurite:
+    image: mcr.microsoft.com/azure-storage/azurite
+    container_name: azurite
+    ports:
+      - "10000:10000"
+    networks:
+      - cloudscale-network
+    restart: always
+
+  nginx:
+    image: nginx:alpine
+    ports:
+      - "5000:80"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      - ingestion-api
+    networks:
+      - cloudscale-network
+    restart: always
+
+  ingestion-api:
+    build:
+      context: .
+      dockerfile: src/CloudScale.IngestionApi/Dockerfile
+    deploy:
+      replicas: 1
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Development
+      - ASPNETCORE_URLS=http://+:8080
+      - ServiceBus__ConnectionString=Endpoint=sb://servicebus-emulator:5672/;SharedAccessKeyName=RootManageSharedAccessKey;SharedAccessKey=SAS_KEY_VALUE;UseDevelopmentEmulator=true
+      - ServiceBus__QueueName=events-ingestion
+      - ServiceBus__FullyQualifiedNamespace=sbemulatorns
+      - CosmosDb__Endpoint=https://cosmosdb-emulator:8081/
+      - CosmosDb__DatabaseName=EventsDb
+      - CosmosDb__ContainerName=Events
+      - CosmosDb__AccountKey=C2y6yDjf5/R+ob0N8A7Cgv30VRDJIWEHLM+4QDU5DE2nQ9nDuVTqobD4b8mGGyPMbIZnqyMsEcaGQy67XIw/Jw==
+    depends_on:
+      cosmosdb-emulator:
+        condition: service_healthy
+      servicebus-emulator:
+        condition: service_started
+    restart: always
+    networks:
+      - cloudscale-network
+
+  event-processor:
+    build:
+      context: .
+      dockerfile: src/CloudScale.EventProcessor/Dockerfile
+    deploy:
+      replicas: 3
+    environment:
+      - DOTNET_ENVIRONMENT=Development
+      - ServiceBus__ConnectionString=Endpoint=sb://servicebus-emulator:5672/;SharedAccessKeyName=RootManageSharedAccessKey;SharedAccessKey=SAS_KEY_VALUE;UseDevelopmentEmulator=true
+      - ServiceBus__QueueName=events-ingestion
+      - ServiceBus__FullyQualifiedNamespace=sbemulatorns
+      - ServiceBus__MaxConcurrentCalls=32
+      - ServiceBus__PrefetchCount=100
+      - CosmosDb__Endpoint=https://cosmosdb-emulator:8081/
+      - CosmosDb__DatabaseName=EventsDb
+      - CosmosDb__ContainerName=Events
+      - CosmosDb__AccountKey=C2y6yDjf5/R+ob0N8A7Cgv30VRDJIWEHLM+4QDU5DE2nQ9nDuVTqobD4b8mGGyPMbIZnqyMsEcaGQy67XIw/Jw==
+      - ConnectionStrings__StorageAccount=DefaultEndpointsProtocol=http;AccountName=devstoreaccount1;AccountKey=Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw==;BlobEndpoint=http://azurite:10000/devstoreaccount1;
+    depends_on:
+      cosmosdb-emulator:
+        condition: service_healthy
+      servicebus-emulator:
+        condition: service_started
+      azurite:
+        condition: service_started
+    restart: always
+    networks:
+      - cloudscale-network
+
+  dashboard:
+    build:
+      context: src/CloudScale.Dashboard
+      dockerfile: Dockerfile
+    ports:
+      - "3001:5173"
+    environment:
+      - VITE_API_URL=http://localhost:5000/api/dashboard
+    restart: always
+    depends_on:
+      - nginx
+    networks:
+      - cloudscale-network
+
+networks:
+  cloudscale-network:
+    driver: bridge

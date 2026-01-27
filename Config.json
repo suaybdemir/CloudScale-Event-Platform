@@ -1,0 +1,33 @@
+{
+    "UserConfig": {
+        "Namespaces": [
+            {
+                "Name": "sbemulatorns",
+                "Queues": [
+                    {
+                        "Name": "events-ingestion",
+                        "Properties": {
+                            "DeadLetteringOnMessageExpiration": true,
+                            "MaxDeliveryCount": 10,
+                            "LockDuration": "PT5M"
+                        }
+                    }
+                ],
+                "Topics": [],
+                "AuthorizationRules": [
+                    {
+                        "Name": "RootManageSharedAccessKey",
+                        "Rights": [
+                            "Manage",
+                            "Send",
+                            "Listen"
+                        ]
+                    }
+                ]
+            }
+        ],
+        "Logging": {
+            "Type": "File"
+        }
+    }
+}

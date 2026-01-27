@@ -1,0 +1,50 @@
+# .NET Core
+bin/
+obj/
+.vs/
+*.user
+*.suo
+*_i.c
+*_p.c
+*.ncb
+*.suo
+*.tlb
+*.tlh
+*.bak
+*.cache
+*.ilk
+*.log
+[Bb]in
+[Oo]bj
+*/[Bb]in
+*/[Oo]bj
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+*.env
+
+# VS Code
+.vscode/
+!.vscode/extensions.json
+!.vscode/tasks.json
+!.vscode/launch.json
+
+# Docker
+docker-compose.override.yml
+
+# Environment Specific
+appsettings.Development.json
+local.settings.json
+
+# Azure
+.azure/
+azurite_data/
+azurite_logs/
+
+# Mac / Linux
+.DS_Store
+.history

@@ -1,0 +1,153 @@
+// CloudScale Events Analytics Queries
+// Run these in Azure Data Explorer Query Editor
+
+// ============================================
+// TABLE SETUP (Run Once)
+// ============================================
+
+// 1. Create Events Table
+.create table Events (
+    EventId: string, 
+    EventType: string, 
+    TenantId: string, 
+    UserId: string,
+    CreatedAt: datetime, 
+    CorrelationId: string,
+    IsSuspicious: bool,
+    Metadata: dynamic, 
+    Payload: dynamic
+)
+
+// 2. Enable Streaming Ingestion
+.alter table Events policy streamingingestion enable
+
+// 3. JSON Mapping for Cosmos Change Feed
+.create table Events ingestion json mapping "CosmosMapping"
+'['
+'    {"column":"EventId", "Properties":{"Path":"$.EventData.EventId"}},'
+'    {"column":"EventType", "Properties":{"Path":"$.EventData.EventType"}},'
+'    {"column":"TenantId", "Properties":{"Path":"$.EventData.TenantId"}},'
+'    {"column":"UserId", "Properties":{"Path":"$.EventData.UserId"}},'
+'    {"column":"CreatedAt", "Properties":{"Path":"$.EventData.CreatedAt"}},'
+'    {"column":"CorrelationId", "Properties":{"Path":"$.EventData.CorrelationId"}},'
+'    {"column":"IsSuspicious", "Properties":{"Path":"$.EventData.Metadata.IsSuspicious"}},'
+'    {"column":"Metadata", "Properties":{"Path":"$.EventData.Metadata"}},'
+'    {"column":"Payload", "Properties":{"Path":"$.EventData"}}'
+']'
+
+// 4. Retention Policy
+.alter table Events policy retention 
+```
+{
+    "SoftDeletePeriod": "365.00:00:00",
+    "Recoverability": "Enabled"
+}
+```
+
+// ============================================
+// ANALYTICS QUERIES
+// ============================================
+
+// Real-time Events Per Minute (Last Hour)
+Events
+| where CreatedAt > ago(1h)
+| summarize EventCount = count() by bin(CreatedAt, 1m), EventType
+| render timechart
+
+// Fraud Detection Over Time
+Events
+| where IsSuspicious == true
+| summarize FraudCount = count() by bin(CreatedAt, 5m)
+| render timechart
+
+// Top 10 Active Tenants
+Events
+| where CreatedAt > ago(24h)
+| summarize EventCount = count() by TenantId
+| top 10 by EventCount desc
+| render barchart
+
+// Event Type Distribution
+Events
+| where CreatedAt > ago(7d)
+| summarize Count = count() by EventType
+| render piechart
+
+// Hourly Traffic Pattern
+Events
+| where CreatedAt > ago(7d)
+| extend Hour = hourofday(CreatedAt)
+| summarize EventCount = count() by Hour
+| order by Hour asc
+| render columnchart
+
+// User Journey Analysis
+Events
+| where CreatedAt > ago(1h)
+| where UserId != ""
+| summarize Events = make_list(EventType) by UserId
+| take 100
+
+// Fraud Rate by Tenant
+Events
+| where CreatedAt > ago(24h)
+| summarize 
+    Total = count(), 
+    Fraud = countif(IsSuspicious == true) 
+    by TenantId
+| extend FraudRate = round(100.0 * Fraud / Total, 2)
+| where Fraud > 0
+| order by FraudRate desc
+
+// P99 Event Processing Time (Requires custom metric)
+// Add to EventProcessor to track processing duration
+Events
+| where CreatedAt > ago(1h)
+| extend ProcessingTimeMs = datetime_diff('millisecond', ingestion_time(), CreatedAt)
+| summarize 
+    p50 = percentile(ProcessingTimeMs, 50),
+    p95 = percentile(ProcessingTimeMs, 95),
+    p99 = percentile(ProcessingTimeMs, 99)
+    by bin(CreatedAt, 5m)
+| render timechart
+
+// ============================================
+// MATERIALIZED VIEWS (Pre-aggregations)
+// ============================================
+
+// Hourly Aggregates
+.create materialized-view HourlyStats on table Events
+{
+    Events
+    | summarize 
+        TotalEvents = count(),
+        FraudEvents = countif(IsSuspicious == true),
+        UniqueUsers = dcount(UserId)
+        by bin(CreatedAt, 1h), TenantId, EventType
+}
+
+// Daily Tenant Summary
+.create materialized-view DailyTenantSummary on table Events
+{
+    Events
+    | summarize 
+        TotalEvents = count(),
+        UniqueUsers = dcount(UserId),
+        FraudRate = round(100.0 * countif(IsSuspicious == true) / count(), 2)
+        by bin(CreatedAt, 1d), TenantId
+}
+
+// ============================================
+// DASHBOARD QUERIES (For Grafana/PowerBI)
+// ============================================
+
+// SLI: Error Rate (if tracking errors in Events)
+// Add error tracking to capture failed events
+
+// SLI: Throughput (Events/sec)
+Events
+| where CreatedAt > ago(5m)
+| summarize EventsPerSecond = count() / 300.0
+
+// SLI: Fraud Detection Accuracy
+// Requires labeled data for true positive calculation

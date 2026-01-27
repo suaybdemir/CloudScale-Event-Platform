@@ -1,0 +1,13 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/CloudScale.Data/CloudScale.Data.csproj" />
+    <Project Path="src/CloudScale.EventProcessor/CloudScale.EventProcessor.csproj" />
+    <Project Path="src/CloudScale.IngestionApi/CloudScale.IngestionApi.csproj" />
+    <Project Path="src/CloudScale.Shared/CloudScale.Shared.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/CloudScale.EventProcessor.Tests/CloudScale.EventProcessor.Tests.csproj" />
+    <Project Path="tests/CloudScale.IngestionApi.Tests/CloudScale.IngestionApi.Tests.csproj" />
+    <Project Path="tests/CloudScale.Integration.Tests/CloudScale.Integration.Tests.csproj" />
+  </Folder>
+</Solution>
