@@ -2,7 +2,7 @@
 
 **Production-grade, high-throughput event ingestion and real-time analytics system designed for 10k+ events/min with sub-200ms latency.**
 
-[![.NET](https://img.shields.io/badge/.NET-8.0-512BD4?logo=dotnet)](https://dotnet.microsoft.com/)
+[![.NET](https://img.shields.io/badge/.NET-10.0-512BD4?logo=dotnet)](https://dotnet.microsoft.com/)
 [![Azure](https://img.shields.io/badge/Azure-Native-0078D4?logo=microsoftazure)](https://azure.microsoft.com/)
 [![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 [![CI/CD](https://img.shields.io/badge/CI%2FCD-GitHub_Actions-2088FF?logo=githubactions)](/.github/workflows/ci-cd.yml)
@@ -17,64 +17,119 @@ Enable enterprises to ingest, process, and analyze millions of user behavior eve
 
 ## 🏗️ Architecture Overview
 
+The system implements a robust **Hot/Cold Storage** pattern with a **Self-Healing Feedback Loop**.
+
 ```mermaid
-flowchart LR
-    subgraph Ingestion["🌐 Ingestion Layer"]
-        C[Client Apps] --> N[Nginx LB]
-        N --> API1[API Instance 1]
-        N --> API2[API Instance 2]
-        N --> API3[API Instance ...]
+graph TD
+    %% Styling
+    classDef azure fill:#0072C6,stroke:#fff,stroke-width:2px,color:#fff;
+    classDef code fill:#5D4037,stroke:#fff,stroke-width:2px,color:#fff;
+    classDef storage fill:#388E3C,stroke:#fff,stroke-width:2px,color:#fff;
+    classDef analytics fill:#F57C00,stroke:#fff,stroke-width:2px,color:#fff;
+    classDef monitor fill:#D32F2F,stroke:#fff,stroke-width:2px,color:#fff;
+
+    subgraph ClientLayer [Clients]
+        MobileApp(Mobile App)
+        WebApp(Web Dashboard)
     end
+
+    subgraph EdgeLayer [Edge Layer]
+        AFD[Azure Front Door]:::azure
+        WAF[Web App Firewall]:::azure
+        AFD --> WAF
+    end
+
+    subgraph IngestionLayer [Ingestion Layer]
+        LB[Load Balancer / Nginx]:::code
+        API[Ingestion API Cluster]:::code
+        Throttling[Throttling Middleware]:::monitor
+        
+        LB --> Throttling
+        Throttling --> API
+    end
+
+    subgraph MessagingLayer [Messaging Layer]
+        SB[Azure Service Bus - Standard]:::azure
+        Topic[Events Topic]:::azure
+        DLQ[Dead Letter Queue]:::azure
+        
+        SB --> Topic
+        Topic -.-> DLQ
+    end
+
+    subgraph ProcessingLayer [Processing Layer]
+        Worker[Event Processor]:::code
+        Fraud[Fraud Detection Engine]:::code
+        Health[Backpressure Monitor]:::monitor
+        
+        Worker --> Fraud
+        Worker <--> Health
+    end
+
+    subgraph StorageLayer [Data Persistence]
+        Cosmos[Azure Cosmos DB - Hot]:::storage
+        Blob[Azure Blob Storage - Archive]:::storage
+    end
+
+    subgraph AnalyticsLayer [Analytics Layer]
+        Synapse[Azure Synapse Analytics]:::analytics
+        PBI[Power BI Dashboard]:::analytics
+    end
+
+    %% Flows
+    MobileApp --> AFD
+    WebApp --> AFD
+    WAF --> LB
+    API -->|High Throughput| SB
     
-    subgraph Processing["⚙️ Processing Layer"]
-        API1 & API2 & API3 --> SB[(Azure Service Bus)]
-        SB --> W1[Worker 1]
-        SB --> W2[Worker 2]
-        SB --> DLQ[(Dead Letter Queue)]
-    end
+    Topic -->|Subscription| Worker
     
-    subgraph Storage["💾 Storage Layer"]
-        W1 & W2 --> CDB[(Cosmos DB)]
-        CDB --> |Change Feed| ADX[(Azure Data Explorer)]
-    end
+    Worker -->|Risk Analysis| Cosmos
+    Worker -->|Archiving| Blob
+    Blob -->|Batch Ingest| Synapse
+    Synapse --> PBI
     
-    subgraph Observability["📊 Observability"]
-        API1 & W1 --> AI[Application Insights]
-        AI --> DASH[Dashboard]
-    end
+    %% Feedback Loop (Monitor & Adjust)
+    Health -.->|1. Monitor Queue Depth| SB
+    Health -.->|2. Update Health State| Cosmos
+    Cosmos -.->|3. Read Pressure State| API
+    API -.->|4. Throttling (429)| Throttling
+    
+    %% Legend
+    linkStyle 10,11,12,13 stroke:#D32F2F,stroke-width:3px;
 ```
 
 ### Component Responsibilities
 
 | Component | Technology | Purpose |
 |-----------|------------|---------|
-| **Ingestion API** | .NET 8 Minimal API | High-performance event intake with validation |
-| **Load Balancer** | Nginx | Distributes traffic across API replicas |
-| **Message Broker** | Azure Service Bus | Reliable async event delivery with DLQ |
-| **Event Processor** | .NET Worker Service | Fraud detection, enrichment, persistence |
-| **Hot Storage** | Azure Cosmos DB | Low-latency event storage (30-day TTL) |
-| **Analytics** | Azure Data Explorer | Historical analysis and dashboards |
-| **Observability** | OpenTelemetry + App Insights | Tracing, metrics, alerting |
+| **Edge Layer** | Azure Front Door + WAF | Global load balancing, DDoS protection, edge security. |
+| **Ingestion API** | .NET 10 Minimal API | High-performance event intake with **Smart Throttling**. |
+| **Message Broker** | Azure Service Bus (Standard) | Reliable async event delivery with Topics & DLQ. |
+| **Event Processor** | .NET Worker Service | Fraud detection, enrichment, **Hot/Cold Storage** routing. |
+| **Hot Storage** | Azure Cosmos DB | Low-latency event storage (30-day TTL). |
+| **Cold Storage** | Azure Blob Storage (Archive) | Long-term archival for compliance and big data analysis. |
+| **Analytics** | Azure Synapse Analytics | Serverless SQL queries on archived data. |
+| **Feedback Loop** | System Health Watcher | **Autoscaling & Self-Healing** (Monitor & Adjust). |
 
 ---
 
-## 💡 Problem Statement
+## 💡 Key Capabilities
 
-### The Challenge
-Modern digital products generate **millions of user events daily** — page views, purchases, clicks, errors. Traditional architectures fail at scale:
+### 1. Smart Throttling (Monitor & Adjust)
+The system is self-aware. If the queue builds up pressure:
+*   **Monitor:** `EventProcessor` detects high queue depth (>1000).
+*   **Signal:** Updates `SystemHealth` state in Cosmos DB.
+*   **Adjust:** `IngestionAPI` reads this state and actively rejects new requests with **429 Too Many Requests** until pressure subsides.
 
-- ❌ Synchronous APIs can't handle traffic spikes
-- ❌ No visibility into fraudulent activity patterns
-- ❌ Data loss during outages
-- ❌ Hours-long delays for analytics
+### 2. Hot & Cold Storage Strategy
+*   **Hot Path:** Critical events stored in Cosmos DB for instant query (Dashboard).
+*   **Cold Path:** ALL events archived to Azure Blob Storage (cheaper, long-term) for Synapse analytics.
 
-### Our Solution
-Event-driven architecture with **guaranteed delivery**, **sub-second processing**, and **real-time fraud detection**:
-
-- ✅ Async ingestion (never lose an event)
-- ✅ Velocity-based fraud detection (identify attacks instantly)
-- ✅ Horizontal scaling (10k → 100k events/min without code changes)
-- ✅ 99.9% SLO with explicit error budgets
+### 3. Fraud Detection
+Real-time analysis of user behavior velocity.
+*   Rule: >10 requests/minute from same IP → **Flag as Suspicious**.
+*   Process: Marked events are stored safely but trigger security alerts.
 
 ---
 
@@ -82,220 +137,71 @@ Event-driven architecture with **guaranteed delivery**, **sub-second processing*
 
 | Layer | Technology | Why This Choice |
 |-------|------------|-----------------|
-| **API** | .NET 8 Minimal API | Lowest latency, AOT-ready, first-class Azure integration |
-| **Messaging** | Azure Service Bus | DLQ support, sessions, FIFO guarantee (vs Event Hubs) |
-| **Database** | Azure Cosmos DB | Single-digit ms latency, auto-scaling, global distribution |
-| **Analytics** | Azure Data Explorer | Petabyte-scale, KQL queries, time-series optimized |
-| **Resilience** | Polly 8 | Circuit breakers, retries with exponential backoff |
-| **Observability** | OpenTelemetry | Vendor-neutral tracing/metrics, Azure Monitor export |
-| **IaC** | Bicep | Native Azure, type-safe, modular deployments |
-| **CI/CD** | GitHub Actions | Build, test, deploy automation |
-
----
-
-## 🔥 Key Features
-
-### 1. Rate Limiting (Dual Algorithm)
-```
-Token Bucket (per-IP): 100 tokens, 10/sec refill
-Sliding Window (global): 10,000 requests/minute
-```
-Protects system during traffic spikes while allowing legitimate bursts.
-
-### 2. Backpressure Handling
-```
-Queue Depth < 1k  → 32 concurrent processors
-Queue Depth 5-10k → 16 concurrent processors  
-Queue Depth > 10k → 4 concurrent processors (critical mode)
-```
-Prevents cascading failures when downstream services slow down.
-
-### 3. Fraud Detection
-```
-Rule: >10 requests/minute from same IP → Flag as suspicious
-Action: Event marked, stored, but triggers security alert
-```
-Real-time velocity checks with in-memory caching.
-
-### 4. Resilient Processing
-```csharp
-// Polly pipeline: Retry → Circuit Breaker
-Retry: 3 attempts, exponential backoff (500ms → 1s → 2s)
-Circuit Breaker: Opens after 50% failures in 30s window
-```
-
----
-
-## ⚖️ Trade-offs & Decisions
-
-> **"Every architecture decision is a trade-off. Senior engineers explain why, not just what."**
-
-| Decision | Chosen | Alternative | Why |
-|----------|--------|-------------|-----|
-| **Message Broker** | Service Bus | Event Hubs | Need DLQ + session ordering, not raw throughput |
-| **Database** | Cosmos DB | PostgreSQL | Sub-10ms latency required, schema flexibility |
-| **Compute** | Container Apps | AKS | No K8s operational burden, KEDA scaling built-in |
-| **API Gateway** | Nginx + Custom | APIM | Cost ($50/mo saved), custom rate limiting sufficient |
-| **Consistency** | Session | Strong | Balance between latency and read-your-writes |
-
-📖 **Full analysis**: [docs/tradeoffs.md](docs/tradeoffs.md)
-
----
-
-## 📊 Observability & SRE
-
-### Service Level Objectives
-
-| SLI | Target | Error Budget (30d) |
-|-----|--------|-------------------|
-| Availability | 99.9% | 43 min downtime |
-| Ingestion p99 | < 200ms | N/A |
-| Processing p99 | < 2s | N/A |
-| Error Rate | < 0.1% | ~4,320 events |
-
-### Key Metrics
-
-```
-cloudscale_events_ingested_total        - Throughput counter
-cloudscale_ingestion_duration_seconds   - Latency histogram
-cloudscale_fraud_detected_total         - Security counter
-cloudscale_queue_depth                  - Backpressure gauge
-cloudscale_rate_limit_rejections_total  - Capacity indicator
-```
-
-### Alerting Strategy
-
-| Severity | Condition | Response |
-|----------|-----------|----------|
-| 🔴 Critical | Error rate > 5% for 5min | Page on-call |
-| 🟡 Warning | p99 latency > 500ms for 10min | Slack alert |
-| 🔵 Info | Queue depth > 5,000 | Dashboard only |
-
-📖 **Full SRE guide**: [docs/sli-slo.md](docs/sli-slo.md)
+| **Framework** | .NET 10 (Preview) | Cutting edge performance, AOT readiness. |
+| **Messaging** | Azure Service Bus | Enterprise-grade reliability (FIFO, Sessions). |
+| **Database** | Azure Cosmos DB | Single-digit ms latency, global scale. |
+| **Storage** | Azure Blob Storage | Cost-effective tiering (Hot/Cool/Archive). |
+| **Analytics** | Azure Synapse | Unification of Big Data and Data Warehousing. |
+| **IaC** | Bicep | Declarative Azure infrastructure as code. |
+| **CI/CD** | GitHub Actions | Automated build, test, and deployment pipelines. |
 
 ---
 
 ## 🚀 Getting Started
 
 ### Prerequisites
-- Docker & Docker Compose
-- .NET 8 SDK
-- Azure CLI (for cloud deployment)
+*   Docker & Docker Compose
+*   .NET 10 SDK (or .NET 8)
+*   Azure CLI (optional for cloud deployment)
+*   git
 
-### Local Development (Emulators)
+### Local Development (Docker)
+
+1.  **Clone the repository:**
+    ```bash
+    git clone https://github.com/suaybdemir/CloudScale-Event-Platform.git
+    cd CloudScale-Event-Platform
+    ```
+
+2.  **Start the environment:**
+    ```bash
+    docker compose up -d
+    ```
+    *This starts the API, Worker, Nginx, Cosmos DB Emulator, Azurite (Blob), Service Bus Emulator and SQL Edge.*
+
+3.  **Verify Health:**
+    Visit endpoint: `http://localhost:5000/health`
+
+4.  **View Data:**
+    *   **Dashboard:** [http://localhost:3001](http://localhost:3001)
+    *   **Cosmos Explorer:** [https://localhost:8081/_explorer/index.html](https://localhost:8081/_explorer/index.html)
+
+### Azure Deployment (IaC)
+
+Deploy the entire infrastructure to Azure using Bicep:
 
 ```bash
-# Clone repository
-git clone https://github.com/yourusername/cloudscale-event-platform.git
-cd cloudscale-event-platform
-
-# Start all services
-docker compose up -d
-
-# Verify health
-curl http://localhost:5000/health
-
-# Send test event
-curl -X POST http://localhost:5000/api/events \
-  -H "Content-Type: application/json" \
-  -d '{"eventType":"page_view","correlationId":"test-1","tenantId":"acme","url":"/home"}'
-```
-
-### Azure Deployment
-
-```bash
-# Login to Azure
 az login
-
-# Create resource group
-az group create -n rg-cloudscale-prod -l eastus
-
-# Deploy infrastructure
 az deployment group create \
-  -g rg-cloudscale-prod \
-  -f infra/main.bicep \
-  -p environmentName=prod
-
-# Deploy application (via GitHub Actions or manual)
+  --resource-group rg-cloudscale-prod \
+  --template-file infra/main.bicep \
+  --parameters environmentName=prod
 ```
-
-### Load Testing
-
-```bash
-# Activate virtual environment
-source .venv/bin/activate
-
-# Run stable load test (10k events)
-python load_test_stable.py --duration 60 --target-rps 1000
-```
-
----
-
-## 📁 Project Structure
-
-```
-cloudscale-event-platform/
-├── src/
-│   ├── CloudScale.IngestionApi/      # HTTP API (Minimal API)
-│   │   ├── Endpoints/                # Route handlers
-│   │   ├── Middleware/               # Rate limiting, correlation
-│   │   ├── Services/                 # Service Bus producer
-│   │   └── Telemetry/                # Custom metrics
-│   ├── CloudScale.EventProcessor/    # Background worker
-│   │   ├── Services/                 # Cosmos, Fraud, Scoring
-│   │   └── Workers/                  # Message processing
-│   └── CloudScale.Shared/            # DTOs, validators, constants
-├── infra/
-│   ├── main.bicep                    # Main deployment
-│   └── modules/                      # Cosmos, Service Bus, etc.
-├── docs/
-│   ├── architecture.md               # System design deep-dive
-│   ├── tradeoffs.md                  # Decision rationale
-│   ├── sli-slo.md                    # SRE definitions
-│   └── interview-cheatsheet.md       # Q&A preparation
-├── tests/
-│   └── CloudScale.*.Tests/           # Unit & integration tests
-├── .github/workflows/
-│   └── ci-cd.yml                     # Build, test, deploy
-└── docker-compose.yml                # Local development
-```
-
----
-
-## 🔮 Future Enhancements
-
-| Enhancement | Priority | Status |
-|-------------|----------|--------|
-| Azure Data Explorer pipeline | High | Planned |
-| Canary deployments | Medium | Backlog |
-| Feature flags (Azure App Config) | Medium | Backlog |
-| Chaos engineering tests | Low | Research |
-| GDPR-compliant deletion | High | Planned |
-| Multi-region deployment | Medium | Designed |
 
 ---
 
 ## 🤝 Contributing
 
-1. Fork the repository
-2. Create feature branch (`git checkout -b feature/amazing-feature`)
-3. Commit with conventional commits (`feat:`, `fix:`, `docs:`)
-4. Push and create Pull Request
+1.  Fork the repository
+2.  Create feature branch (`git checkout -b feature/amazing-feature`)
+3.  Commit with conventional commits (`feat:`, `fix:`, `docs:`)
+4.  Push and create Pull Request
 
 ---
 
 ## 📄 License
 
 This project is licensed under the MIT License - see [LICENSE](LICENSE) file.
-
----
-
-## 📚 Further Reading
-
-- [Architecture Deep-Dive](docs/architecture.md)
-- [Trade-offs Analysis](docs/tradeoffs.md)
-- [SLI/SLO Definitions](docs/sli-slo.md)
-- [Interview Preparation](docs/interview-cheatsheet.md)
 
 ---
 
