@@ -1,5 +1,6 @@
 using CloudScale.IngestionApi.Middleware;
 using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using Moq;
 
@@ -8,10 +9,18 @@ namespace CloudScale.IngestionApi.Tests;
 public class RateLimitingTests
 {
     private readonly Mock<ILogger<RateLimitingMiddleware>> _loggerMock;
+    private readonly Mock<IConfiguration> _configMock;
 
     public RateLimitingTests()
     {
         _loggerMock = new Mock<ILogger<RateLimitingMiddleware>>();
+        _configMock = new Mock<IConfiguration>();
+        
+        // Setup default config values to emulate appsettings
+        var configSectionMock = new Mock<IConfigurationSection>();
+        configSectionMock.Setup(x => x.Value).Returns("10000"); // Default Global Limit
+
+        _configMock.Setup(x => x.GetSection(It.IsAny<string>())).Returns(configSectionMock.Object);
     }
 
     [Fact]
@@ -20,7 +29,8 @@ public class RateLimitingTests
         // Arrange
         var middleware = new RateLimitingMiddleware(
             next: (innerHttpContext) => Task.CompletedTask,
-            _loggerMock.Object
+            _loggerMock.Object,
+            _configMock.Object
         );
 
         var context = CreateHttpContext("192.168.1.1");
@@ -38,7 +48,8 @@ public class RateLimitingTests
         // Arrange
         var middleware = new RateLimitingMiddleware(
             next: (innerHttpContext) => Task.CompletedTask,
-            _loggerMock.Object
+            _loggerMock.Object,
+            _configMock.Object
         );
 
         var clientIp = "10.0.0.100";
@@ -66,7 +77,8 @@ public class RateLimitingTests
         // Arrange
         var middleware = new RateLimitingMiddleware(
             next: (innerHttpContext) => Task.CompletedTask,
-            _loggerMock.Object
+            _loggerMock.Object,
+            _configMock.Object
         );
 
         var clientIp = "10.0.0.200";
@@ -96,7 +108,8 @@ public class RateLimitingTests
         // Arrange
         var middleware = new RateLimitingMiddleware(
             next: (innerHttpContext) => Task.CompletedTask,
-            _loggerMock.Object
+            _loggerMock.Object,
+            _configMock.Object
         );
 
         // Act - Send many requests to /health
