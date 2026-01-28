@@ -34,6 +34,7 @@ public class InMemoryStatsService : IStatsService
     
     private double _avgLatencyMs = 0;
     private long _processedCount = 0;
+    private long _accumulatedRiskScore = 0;
     private readonly DateTime _startTime = DateTime.UtcNow;
 
     public InMemoryStatsService(IConfiguration config)
@@ -108,6 +109,7 @@ public class InMemoryStatsService : IStatsService
                 if (rsObj is int rs) riskScore = rs;
                 else if (rsObj != null && int.TryParse(rsObj.ToString(), out var parsedRs)) riskScore = parsedRs;
             }
+            Interlocked.Add(ref _accumulatedRiskScore, riskScore);
 
             var riskLevel = riskScore >= 80 ? "Critical" : 
                             riskScore >= 60 ? "High" : 
@@ -206,13 +208,18 @@ public class InMemoryStatsService : IStatsService
                 targetThroughput = 2000 // 100% Baseline
             },
             distribution = _eventTypeCounts,
-            performance = new { avgLatencyMs = Math.Round(_avgLatencyMs, 2), uptimeSeconds = (DateTime.UtcNow - _startTime).TotalSeconds },
+            performance = new { 
+                avgLatencyMs = Math.Round(_avgLatencyMs, 2), 
+                uptimeSeconds = (DateTime.UtcNow - _startTime).TotalSeconds,
+                avgRiskScore = Math.Round(_accumulatedRiskScore > 0 && _fraudCount > 0 ? (double)_accumulatedRiskScore / _fraudCount : 0, 1)
+            },
             system = new {
                 apiStatus = "Healthy",
                 processorStatus = "Healthy",
                 apiReplicas = 1,
                 processorReplicas = 3,
-                maxConcurrent = (int)_maxConcurrent
+                maxConcurrent = (int)_maxConcurrent,
+                highRiskCount = _recentAlerts.Count(a => (int)((dynamic)a).riskScore >= 80)
             }
         };
     }
