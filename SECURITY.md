@@ -13,6 +13,6 @@ Only the latest `main` branch is currently supported for security updates.
 
 If you discover a security vulnerability within this project, please **DO NOT** create a public GitHub issue.
 
-Instead, please report it via email to the project maintainer (suaybdemir@example.com).
+Instead, please report it via email to the project maintainer (suaybbyaus@gmail.com).
 
 We will verify the issue and fix it as soon as possible.
