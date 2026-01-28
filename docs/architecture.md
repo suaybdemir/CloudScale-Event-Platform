@@ -28,29 +28,26 @@ graph TD
         Client(Client Apps / Load Generator)
     end
 
-    subgraph Host [Single Node (i7-2600)]
-        
-        subgraph Ingestion [Ingestion Layer]
-            Nginx[Nginx Reverse Proxy :5000]:::ingestion
-            API[Ingestion API :8080]:::ingestion
-        end
+    subgraph Ingestion [Ingestion Layer]
+        Nginx[Nginx Reverse Proxy :5000]:::ingestion
+        API[Ingestion API :8080]:::ingestion
+    end
 
-        subgraph Messaging [ buffering ]
-            SB_Emulator[Service Bus Emulator :5672]:::storage
-        end
+    subgraph Messaging [Service Bus Emulator]
+        SB_Emulator[Service Bus Emulator :5672]:::storage
+    end
 
-        subgraph Processing [Compute]
-            Processor[Event Processor]:::processing
-        end
+    subgraph Processing [Compute Layer]
+        Processor[Event Processor]:::processing
+    end
 
-        subgraph Persistence [Data Layer]
-            Cosmos[Cosmos DB Emulator :8082]:::storage
-            Redis[Redis Cache :6379]:::storage
-        end
+    subgraph Persistence [Data Layer]
+        Cosmos[Cosmos DB Emulator :8082]:::storage
+        Redis[Redis Cache :6379]:::storage
+    end
 
-        subgraph Observability
-            Dashboard[Dashboard :3001]:::external
-        end
+    subgraph Observability [Monitoring]
+        Dashboard[Dashboard :3001]:::external
     end
 
     %% Data Flow
