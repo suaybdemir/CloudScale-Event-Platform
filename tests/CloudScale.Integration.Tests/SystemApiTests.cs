@@ -31,23 +31,35 @@ public class SystemApiTests : IClassFixture<WebApplicationFactory<Program>>
                 var mockSbClient = new Mock<ServiceBusClient>();
                 var mockSbSender = new Mock<ServiceBusSender>();
                 
-                // Mock CreateSender to return our mock sender
                 mockSbClient.Setup(x => x.CreateSender(It.IsAny<string>()))
                             .Returns(mockSbSender.Object);
                 
-                // Mock CreateSender to return our mock sender (if using Queue Name override)
                 mockSbClient.Setup(x => x.CreateSender(It.IsAny<string>(), It.IsAny<ServiceBusSenderOptions>()))
                             .Returns(mockSbSender.Object);
 
-                // Mock SendMessageAsync to succeed
                 mockSbSender.Setup(x => x.SendMessageAsync(It.IsAny<ServiceBusMessage>(), It.IsAny<CancellationToken>()))
                             .Returns(Task.CompletedTask);
 
                 services.AddSingleton(mockSbClient.Object);
 
-                // 3. Remove Real Cosmos (if used in ingestion path, though mainly Processor uses it)
+                // 3. Remove Real Cosmos
                 services.RemoveAll<CosmosClient>();
                 var mockCosmos = new Mock<CosmosClient>();
+                var mockContainer = new Mock<Container>();
+
+                // Setup GetContainer to prevent NPE in SystemHealthWatcher
+                mockCosmos.Setup(x => x.GetContainer(It.IsAny<string>(), It.IsAny<string>()))
+                          .Returns(mockContainer.Object);
+                
+                // Mock ReadItemAsync to throw NotFound (simulating no health override)
+                // or return a dummy item. Thowing NotFound is safer path in SystemHealthWatcher logic.
+                mockContainer.Setup(x => x.ReadItemAsync<dynamic>(
+                        It.IsAny<string>(), 
+                        It.IsAny<PartitionKey>(), 
+                        It.IsAny<ItemRequestOptions>(), 
+                        It.IsAny<CancellationToken>()))
+                      .ThrowsAsync(new CosmosException("Not Found", HttpStatusCode.NotFound, 0, "0", 0));
+
                 services.AddSingleton(mockCosmos.Object);
             });
         });
@@ -74,6 +86,10 @@ public class SystemApiTests : IClassFixture<WebApplicationFactory<Program>>
             type = "com.cloudscale.pageview",
             source = "/test/runner",
             id = Guid.NewGuid().ToString(),
+            // REQUIRED FIELDS FOR VALIDATION
+            tenantId = "test-tenant-1",
+            correlationId = Guid.NewGuid().ToString(),
+            // Payload Data
             userId = "test-user-1",
             url = "https://integration-test.com"
         };
@@ -83,7 +99,14 @@ public class SystemApiTests : IClassFixture<WebApplicationFactory<Program>>
         _client.DefaultRequestHeaders.Add("X-Api-Key", "dev-secret-key");
         
         var response = await _client.PostAsync("/api/ingest", content);
-        response.EnsureSuccessStatusCode();
+        
+        // Debug output if fails
+        if (!response.IsSuccessStatusCode)
+        {
+            var err = await response.Content.ReadAsStringAsync();
+            Assert.Fail($"Status: {response.StatusCode}, Details: {err}");
+        }
+
         Assert.Equal(HttpStatusCode.Accepted, response.StatusCode);
     }
 
@@ -98,8 +121,12 @@ public class SystemApiTests : IClassFixture<WebApplicationFactory<Program>>
             type = "com.cloudscale.pageview",
             source = "/test/runner",
             id = id,
-            url = "https://idempotency-test.com",
-            userId = "test-user-2"
+            // REQUIRED FIELDS
+            tenantId = "test-tenant-2",
+            correlationId = Guid.NewGuid().ToString(),
+            // Payload Data
+            userId = "test-user-2",
+            url = "https://idempotency-test.com"
         };
         var json = JsonSerializer.Serialize(payload);
         _client.DefaultRequestHeaders.Clear();
