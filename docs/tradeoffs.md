@@ -56,6 +56,32 @@ In **Synchronous Mode**, the API holds the connection open until Service Bus ack
 | **Bounded Queue (Dropping)** | Accept until full, then drop new (Tail Drop). | **Data Loss**. Events are lost, but system stays alive. |
 | **Synchronous (No Queue)** | Caller waits for DB/Broker. | **Backpressure**. Client is forced to slow down (TCP Window). |
 
+### Visualizing the Stability Spectrum
+
+```mermaid
+graph LR
+    subgraph Danger Zone [High Risk]
+        Unbounded[Unbounded Queue]
+        Blocking[Bounded + Blocking]
+    end
+
+    subgraph Safe Zone [Production Safe]
+        Dropping[Bounded + Dropping]
+        Sync[Synchronous / No Queue]
+    end
+
+    Unbounded -->|Risk| OOM[OOM Crash]
+    Blocking -->|Risk| Cascade[Thread Exhaustion]
+    
+    Dropping -->|Tradeoff| Loss[Data Loss]
+    Sync -->|Tradeoff| Latency[Client Latency]
+
+    style Danger Zone fill:#ffcccc,stroke:#cc0000
+    style Safe Zone fill:#ccffcc,stroke:#006600
+    style Sync stroke-width:4px,stroke:#006600
+```
+
+
 **Decision**: We reverted to **Synchronous (No Queue)**.
 *   **Why**: Given our Single-Node constraint, any memory buffer competes with the Service Bus Emulator for RAM.
 *   **Trade-off**: We force the **Client** to handle the complexity of retries, rather than the **Server** handling the complexity of buffering.

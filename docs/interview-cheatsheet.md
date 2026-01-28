@@ -35,18 +35,29 @@ This document summarizes the **"War Stories"** and **"Hard Lessons"** learned du
 
 When the Dashboard shows "0 Events", follow this **Probability-Based Workflow**:
 
-1.  **Check Ingestion (The Door)**:
-    *   Is `Throughput` > 0?
-    *   *If No*: Check Nginx logs (`docker logs nginx`). Is traffic reaching us?
+When the Dashboard shows "0 Events", follow this **Probability-Based Workflow**:
 
-2.  **Check Queue (The Buffer)**:
-    *   Is `Queue Depth` growing?
-    *   *If Yes*: Ingestion is fine, **Processing is dead**.
-
-3.  **Check Processor (The Brain)**:
-    *   Check `docker logs event-processor`.
-    *   Search for "CircuitBreaker".
-    *   *Common Cause*: Cosmos DB Emulator connection refused (Certificate issue or Port issue).
+```mermaid
+graph TD
+    Start(Dashboard Shows 0 Events) --> CheckIngest{Throughput > 0?}
+    
+    CheckIngest -- No --> IngestFail[Issue: Ingestion Layer]
+    IngestFail --> CheckNginx[Check Nginx Logs]
+    CheckNginx --> FixGate[Fix Gateway / Firewall]
+    
+    CheckIngest -- Yes --> CheckQueue{Queue Depth Growing?}
+    
+    CheckQueue -- Yes --> ProcFail[Issue: Processing Layer]
+    ProcFail --> CheckProcessorLogs[Check event-processor Logs]
+    CheckProcessorLogs --> SearchCB[Search: 'CircuitBreaker']
+    SearchCB --> FixCosmos[Fix Cosmos DB Cert/Port]
+    
+    CheckQueue -- No --> IngestFail2[Issue: Ingestion API]
+    IngestFail2 --> CheckAPI[Check API Logs for 503/429]
+    
+    classDef critical fill:#ffcccc,stroke:#333,stroke-width:2px;
+    class ProcFail,IngestFail,IngestFail2 critical;
+```
 
 ---
 

@@ -53,6 +53,37 @@ We strictly adhere to the **CloudEvents v1.0** specification. Clients MUST send 
     *   If `id` exists in cache (10m): Return `202 Accepted` (or `409` if configured) and **discard** the duplicate.
     *   **Result**: Safe to retry indefinitely.
 
+### 2.1 Protocol Flow (Sequence)
+
+```mermaid
+sequenceDiagram
+    participant C as Client
+    participant A as Ingestion API
+    participant R as Redis (Idempotency)
+    participant Q as Service Bus
+
+    C->>A: POST /ingest (ID: 123)
+    
+    rect rgb(200, 255, 200)
+    Note over A,R: Happy Path
+    A->>R: Exists("123")?
+    R-->>A: False
+    A->>Q: Publish(Event)
+    Q-->>A: Ack
+    A->>R: Set("123", TTL=10m)
+    A-->>C: 202 Accepted
+    end
+
+    rect rgb(255, 200, 200)
+    Note over A,Q: Failure Path (Saturation)
+    C->>A: POST /ingest (ID: 456)
+    A->>Q: Publish(Event)
+    Q--x A: Timeout (Disk I/O Full)
+    A-->>C: 503 Service Unavailable
+    Note right of C: Client MUST Retry<br/>same ID: 456
+    end
+```
+
 ---
 
 ## 3. Response Codes
