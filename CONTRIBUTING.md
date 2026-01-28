@@ -1,31 +1,38 @@
 # Contributing to CloudScale Event Intelligence Platform
 
-First off, thank you for considering contributing to the CloudScale Event Intelligence Platform!
+Thank you for your interest in the CloudScale Event Intelligence Platform. This document outlines the terms and standards for contributing.
 
-## ⚠️ License Notice: CC BY-NC 4.0
+## 1. License Agreement & User Understanding
 
-**IMPORTANT:** This project is licensed under the **Creative Commons Attribution-NonCommercial 4.0 International (CC BY-NC 4.0)** license.
+**IMPORTANT:** This repository accepts contributions under the explicit understanding that:
 
-*   By contributing to this repository, you agree that your contributions will be licensed under the same terms.
-*   **Commercial use of this codebase is strictly prohibited.**
-*   You cannot sell, re-license, or use this code for commercial advantage without explicit permission from the author.
+1.  **License**: All contributions (including code, documentation, scripts, and assets) are automatically licensed under the **Creative Commons Attribution-NonCommercial 4.0 International (CC BY-NC 4.0)** license.
+2.  **Commercial Restriction**: By submitting a Pull Request, you acknowledge that this codebase is for **Non-Commercial use only**. You agree not to use contributions to this repository for commercial advantage or monetary compensation.
+3.  **No Commercial Expectations**: You confirm that your contribution does not introduce or imply any expectation of commercial support, warranty, or liability from the Project Owner.
 
-## How to Contribute
+## 2. Architectural Scope & Boundaries
 
-1.  **Fork the Repository**: Create your own fork of the code.
-2.  **Create a Branch**: `git checkout -b feat/my-new-feature`
-3.  **Commit Changes**: Use Conventional Commits (e.g., `feat: add new ingestion metric`).
-4.  **Test**: Ensure `dotnet test` passes locally.
-5.  **Push**: `git push origin feat/my-new-feature`
-6.  **Pull Request**: Submit a PR to the `main` branch.
+To maintain the high-performance nature of this platform, we enforce strict architectural boundaries:
 
-## Coding Standards
+*   **Infrastructure Dependencies**: You may **NOT** introduce new infrastructure components (e.g., new databases, message queues, cloud services) without a prior approved **Architectural Decision Record (ADR)**.
+*   **Performance Impact**: Any change that impacts the critical ingestion path (e.g., adding reflection, synchronous I/O, or heavy allocations) will be rejected unless accompanied by benchmarks proving no regression.
+*   **Breaking Changes**: API contracts are stable. Breaking changes are generally not accepted without a compelling, approved migration path.
 
-*   **Language**: C# (.NET 10 / .NET 8 LTS)
-*   **Style**: Follow standard .NET coding conventions.
-*   **Testing**: All new logic must have corresponding Unit or Integration tests.
-*   **Architecture**: Respect the clean separation between Ingestion, Processing, and Shared libraries.
+## 3. How to Contribute
 
-## Reporting Bugs
+1.  **Fork & Branch**: Create a feature branch from `main`.
+2.  **Code Standards**:
+    *   Follow standard .NET 10 / C# conventions.
+    *   Cover all logic with Unit Tests (`tests/CloudScale.Shared.Tests`).
+    *   Cover system flows with Integration Tests (`tests/CloudScale.Integration.Tests`).
+3.  **Commit Messages**: Use Conventional Commits (e.g., `feat: add resilience policy`, `fix: resolving null reference`).
+4.  **Pull Request**:
+    *   Fill out the PR template completely.
+    *   Acknowledge the legal checklist.
+    *   Understand that rejection is possible and may occur without detailed justification if the contribution does not align with the roadmap.
 
-Please use the **Bug Report** template to submit issues. detailed reproduction steps are required.
+## 4. Reporting Bugs
+
+Please use the provided **Bug Report** template.
+*   Issues that cannot be reproduced on the `main` branch may be closed.
+*   Issues lacking environmental details (Docker version, OS) will be asked for clarification.

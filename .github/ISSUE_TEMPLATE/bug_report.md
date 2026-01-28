@@ -10,6 +10,10 @@ assignees: ''
 **Describe the bug**
 A clear and concise description of what the bug is.
 
+**Reproduction Check**
+- [ ] Is this reproducible on the latest `main` branch?
+- [ ] Have you checked if this is a known issue?
+
 **To Reproduce**
 Steps to reproduce the behavior:
 1. Go to '...'
@@ -20,13 +24,13 @@ Steps to reproduce the behavior:
 **Expected behavior**
 A clear and concise description of what you expected to happen.
 
-**Screenshots**
-If applicable, add screenshots to help explain your problem.
-
-**Desktop (please complete the following information):**
+**Environment (Required):**
  - OS: [e.g. Linux, Windows]
- - Browser [e.g. chrome, safari]
- - Version [e.g. 22]
+ - Docker Compose Version: [e.g. v2.20.0]
+ - .NET Version: [e.g. 10.0 Preview]
+
+**Logs / Screenshots**
+If applicable, add screenshots or paste relevant logs.
 
 **Additional context**
 Add any other context about the problem here.

@@ -15,4 +15,8 @@ Please include a summary of the change and which issue is fixed.
 - [ ] My changes generate no new warnings
 - [ ] I have added tests that prove my fix is effective or that my feature works
 - [ ] New and existing unit tests pass locally with my changes
-- [ ] I understand that my contribution is under the **CC BY-NC 4.0 license**
+
+## Legal & Governance Acknowledgement (REQUIRED)
+- [ ] I confirm this contribution does not introduce commercial usage expectations.
+- [ ] I understand that my contribution may be rejected without detailed justification if it does not align with the roadmap.
+- [ ] I agree that this contribution is submitted under the **CC BY-NC 4.0** license.

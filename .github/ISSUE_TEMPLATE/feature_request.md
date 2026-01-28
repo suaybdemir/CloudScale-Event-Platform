@@ -7,6 +7,8 @@ assignees: ''
 
 ---
 
+> **DISCLAIMER:** Feature requests are evaluated for alignment with the project’s architectural goals. **Acceptance is not guaranteed.** Feature requests do not imply any roadmap commitment from the maintainers.
+
 **Is your feature request related to a problem? Please describe.**
 A clear and concise description of what the problem is. Ex. I'm always frustrated when [...]
 
