@@ -1,309 +1,61 @@
-# Technical Trade-offs & Decision Rationale
+# Architectural Trade-offs & Theory
 
-![System Topology](images/system_architecture_diagram.png)
+This document analyzes the theoretical constraints and mathematical realities of the CloudScale architecture.
 
-> **"Every architecture is a set of trade-offs. This document explains why we made each choice."**
-
-This document is designed for technical interviews. Each section answers: **What did we choose? What were the alternatives? Why this decision?**
+> **"There are no solutions, there are only trade-offs."** — Thomas Sowell
 
 ---
 
-## 1. Message Broker: Service Bus vs Event Hubs
+## 1. Throughput vs. Latency (Little's Law)
 
-### Decision: Azure Service Bus (Standard Tier)
+**Observation**: During the 10k RPS stress test, we hit a hard wall at ~4,112 RPS.
+**Theory**: Little's Law ($L = \lambda W$) explains this perfectly.
 
-| Factor | Service Bus ✅ | Event Hubs ❌ |
-|--------|---------------|--------------|
-| Dead Letter Queue | Native DLQ with reason codes | Manual implementation |
-| Message Ordering | Per-session FIFO | Per-partition only |
-| Message Locking | Lock + renew pattern | Consumer offset |
-| Throughput | ~10k msg/sec | Millions msg/sec |
-| Pricing | Per-message | Per-throughput unit |
+*   $L$ (Concurrency): The number of concurrent requests Kestrel can handle (Threads/Connections).
+*   $\lambda$ (Throughput): Requests Per Second (RPS).
+*   $W$ (Wait Time): Latency per request.
 
-### Why Service Bus?
-1. **DLQ is critical**: Poison messages must not block processing
-2. **We don't need millions/sec**: 10k events/min is well within capacity
-3. **Session support**: Future option for per-tenant ordering
+**The Math**:
+In **Synchronous Mode**, the API holds the connection open until Service Bus acknowledges persistence.
+*   **Normal**: Latency ($W$) = 10ms. Max RPS ($\lambda$) = High.
+*   **Saturation**: Emulator Disk I/O chokes. Latency ($W$) spikes to 500ms+.
+*   **Result**: To maintain $\lambda$ (Throughput) at 4,000 with 500ms latency, we need $L = 4000 \times 0.5 = 2000$ concurrent threads.
+*   **Failure**: The thread pool exhausts. Stability ($L$) is finite. Therefore, as $W$ increases, $\lambda$ **MUST** decrease.
 
-### When to switch to Event Hubs:
-- Need log-style replay (event sourcing)
-- Throughput > 100k events/sec
-- Integration with Stream Analytics
+**Trade-off Definition**:
+*   **We chose**: Resilience (Load Shedding).
+*   **We sacrificed**: Queueing (Accepting more than we can chew).
 
 ---
 
-## 2. Database: Cosmos DB vs PostgreSQL
+## 2. CAP Theorem Application
 
-### Decision: Azure Cosmos DB (NoSQL API)
+**Scenario**: Azure Cosmos DB (PaaS) vs. Cosmos Emulator (Local).
 
-| Factor | Cosmos DB ✅ | PostgreSQL ❌ |
-|--------|-------------|--------------|
-| Write Latency | 5-10ms | 20-50ms |
-| Schema | Flexible (JSON) | Rigid (migrations) |
-| Scaling | Auto-scale RU | Manual sharding |
-| Global Distribution | Built-in | Complex setup |
+### Azure PaaS (Real World)
+*   **Configuration**: Multi-Master or Single-Master with Geo-Replication.
+*   **Capability**: Can tune consistency (Strong, Bounded Staleness, Session, Eventual).
+*   **Trade-off**: You can choose **CP** (Strong Consistency) at the cost of high latency/lower availability during partitions, or **AP** (Eventual) for max throughput.
 
-### Why Cosmos DB?
-1. **Latency SLO**: Need sub-10ms writes for real-time feel
-2. **Event schema varies**: Different event types, flexible metadata
-3. **Multi-tenant partitioning**: Native partition key support
-
-### Trade-offs accepted:
-- Higher cost per operation
-- No complex JOINs
-- RU-based pricing can be unpredictable
-
-### Mitigation:
-- TTL for automatic cleanup (cost control)
-- Proper partition key reduces cross-partition queries
-- Autoscale prevents over-provisioning
+### Emulator (Our Environment)
+*   **Configuration**: Single Container.
+*   **Reality**: **CA** (Consistency + Availability) but **NO** Partition Tolerance (P).
+*   **Impact**: If the host acts weird (Network bridge issues), the Emulator doesn't "failover". It just hangs ("Zombie State").
+*   **Lesson**: Testing distributed algorithms (like consensus) on the Emulator is **invalid**. It simulates the API surface, not the distributed physics.
 
 ---
 
-## 3. Compute: Container Apps vs AKS vs Functions
-
-### Decision: Azure Container Apps
-
-| Factor | Container Apps ✅ | AKS ❌ | Functions ❌ |
-|--------|------------------|--------|-------------|
-| Ops Complexity | Zero | High (cluster mgmt) | Zero |
-| Cold Start | Minimal | None | 1-10+ seconds |
-| Scaling | KEDA built-in | KEDA install | Built-in |
-| Cost | Pay-per-use | Fixed cluster | Per-execution |
-| Long-running | Supported | Supported | 10 min limit |
-
-### Why Container Apps?
-1. **No Kubernetes expertise required**: Focus on application, not infrastructure
-2. **KEDA auto-scaling**: Native Service Bus trigger
-3. **Cost-effective**: No idle cluster costs
-
-### Why NOT AKS (yet)?
-- No need for custom operators
-- No multi-cluster requirements
-- Team doesn't have K8s expertise
-
-### Why NOT Functions?
-- Cold start unacceptable for real-time processing
-- Execution time limits for complex events
-- State management (fraud detection cache) is awkward
-
----
-
-## 4. API Gateway: Custom vs Azure API Management
-
-### Decision: Nginx + Custom Rate Limiting Middleware
-
-| Factor | Custom ✅ | APIM ❌ |
-|--------|----------|--------|
-| Monthly Cost | ~$0 | $50+ (Developer tier) |
-| Rate Limiting | Token Bucket + Sliding Window | Policy-based |
-| Customization | Full control | Configuration limits |
-| Developer Portal | None | Built-in |
-| OAuth/Subscriptions | Manual | Built-in |
-
-### Why Custom?
-1. **Cost**: MVP doesn't need $50/month overhead
-2. **Algorithm control**: Implemented both Token Bucket and Sliding Window
-3. **Interview talking point**: "I implemented rate limiting from scratch"
-
-### When to migrate to APIM:
-- Multiple external consumers
-- Need subscription key management
-- OAuth integration required
-- Want built-in caching
-
----
-
-## 5. Consistency Model: Session vs Strong vs Eventual
-
-### Decision: Session Consistency (Cosmos DB default)
-
-| Level | Latency | Guarantee | Use Case |
-|-------|---------|-----------|----------|
-| Strong | Highest | Linearizable | Banking |
-| Bounded Staleness | Medium | Time-bounded | Trading |
-| Session ✅ | Low | Read-your-writes | User apps |
-| Consistent Prefix | Lower | Ordered | Analytics |
-| Eventual | Lowest | None | Logging |
-
-### Why Session?
-1. **Read-your-writes**: Users see their own events immediately
-2. **Good enough**: We don't need linearizable for event storage
-3. **Multi-region compatible**: Works with geo-replication
-
-### Trade-off:
-- Other users might see slightly stale data
-- Acceptable for event analytics use case
-
----
-
-## 6. Rate Limiting Algorithm: Why Two Algorithms?
-
-### Decision: Token Bucket (per-IP) + Sliding Window (global)
-
-### Token Bucket (Per-IP)
-```
-Allows: Legitimate bursts (batch upload)
-Prevents: Single-source abuse
-Config: 100 tokens, 10/sec refill
-```
-
-### Sliding Window (Global)
-```
-Allows: Distributed traffic
-Prevents: System overload from many sources
-Config: 10,000 requests/minute
-```
-
-### Why Both?
-| Attack Type | Token Bucket | Sliding Window |
-|-------------|--------------|----------------|
-| Single IP flooding | ✅ Blocks | Passes (if under global) |
-| DDoS (many IPs) | Passes (per IP OK) | ✅ Blocks total |
-| Legitimate burst | ✅ Allows | ✅ Allows if under limit |
-
-**Defense in depth**: Neither algorithm alone covers all cases.
-
----
-
-## 7. Storage Strategy: Hot vs Cold Separation
-
-### Decision: Hybrid Model (Cosmos DB + Blob Archive)
-
-| Feature | Hot (Cosmos DB) | Cold (Blob Storage) |
-|---------|-----------------|---------------------|
-| **Cost** | High ($$$) | Low ($) |
-| **Performance** | Millisecond Latency | Minutes/Hours |
-| **Purpose** | Real-time Dashboard | Audit & Analytics |
-| **Retention** | 30 Days (TTL) | 7 Years |
-
-### Why Hybrid?
-1.  **Cost Efficiency**: Storing 7 years of data in Cosmos DB is prohibitively expensive.
-2.  **Performance**: Keeping the active dataset small keeps Cosmos DB queries fast.
-3.  **Compliance**: Blob Storage offers immutable WORM (Write Once Read Many) policies for audit trails.
-
----
-
-## 8. Compute Runtime: .NET 10
-
-### Decision: Upgrade from .NET 8 to .NET 10 (Preview)
-
-### Why Bleeding Edge?
-1.  **Performance**: Significant improvements in LINQ and JSON serialization speed.
-2.  **AOT Readiness**: Native AOT support is mature, drastically reducing container startup time (vital for scaling).
-3.  **Future Proofing**: Aligning with the LTS roadmap early prevents technical debt.
-
----
-
-## 9. Rate Limiting: Static vs Adaptive
-
-### Decision: Adaptive Feedback Loop
-
-Instead of just static limits (e.g., 1000/min), we implemented **System Aware Throttling**.
-
-*   **Mechanism**: `EventProcessor` monitors queue depth. If it spikes, it signals the API to reject traffic.
-*   **Trade-off**: Slightly higher code complexity vs. massive resilience gain against cascading failures.
-
----
-
-## 10. Partition Key: TenantId:yyyy-MM
-
-### Decision: Composite key with tenant + month
-
-```
-Format: {TenantId}:{yyyy-MM}
-Example: acme:2026-01
-```
-
-### Alternatives Considered
-
-| Strategy | Pros | Cons |
-|----------|------|------|
-| TenantId only | Simple | Hot partition in active months |
-| EventId | Perfect distribution | No logical grouping |
-| yyyy-MM only | Time-based | Cross-tenant queries expensive |
-| TenantId:yyyy-MM ✅ | Balanced | Cross-month queries need fan-out |
-
-### Why This Strategy?
-1. **Tenant isolation**: Most queries filter by tenant (single partition)
-2. **Time distribution**: Spreads writes across months
-3. **TTL alignment**: Old partitions expire together
-4. **Predictable performance**: Query scope is clear
-
-### Trade-off accepted:
-- Queries spanning multiple months require fan-out
-- Acceptable because most queries are recent data
-
----
-
-## 8. Observability: OpenTelemetry vs Proprietary SDKs
-
-### Decision: OpenTelemetry with Azure Monitor export
-
-| Approach | Vendor Lock-in | Flexibility | Ecosystem |
-|----------|----------------|-------------|-----------|
-| App Insights SDK only | High | Low | Azure only |
-| OpenTelemetry ✅ | None | High | Universal |
-
-### Why OpenTelemetry?
-1. **Vendor neutral**: Can export to Jaeger, Prometheus, etc.
-2. **Industry standard**: W3C Trace Context support
-3. **Future-proof**: Easy to change backends
-
-### Azure Monitor integration:
-- Still use App Insights for Azure-native dashboards
-- `Azure.Monitor.OpenTelemetry.Exporter` bridges the gap
-- Best of both worlds
-
----
-
-## 9. Retry Strategy: Polly Configuration
-
-### Decision: Exponential Backoff + Circuit Breaker
-
-```csharp
-// Service Bus Producer
-Retry: 3 attempts, 500ms → 1s → 2s (exponential + jitter)
-Circuit Breaker: 50% failure rate in 30s → Open for 30s
-
-// Cosmos DB
-Retry: 5 attempts, 200ms base + respect RetryAfter header
-```
-
-### Why These Numbers?
-| Setting | Value | Rationale |
-|---------|-------|-----------|
-| Max retries | 3-5 | Enough for transient, not infinite loop |
-| Base delay | 200-500ms | Quick recovery for hiccups |
-| Backoff | Exponential | Prevents thundering herd |
-| Jitter | Random | Spreads retry load |
-| Circuit threshold | 50% | Opens before total failure |
-| Break duration | 30s | Time for downstream recovery |
-
----
-
-## 10. What We Chose NOT to Build
-
-| Feature | Reason |
-|---------|--------|
-| Event Sourcing | Complexity > benefit for this use case |
-| CQRS | Single Cosmos container is sufficient |
-| Saga Pattern | No multi-step transactions needed |
-| API Versioning | Single consumer (internal dashboard) |
-| Feature Flags | Adds infrastructure complexity |
-| Real-time WebSocket | Dashboard polls every few seconds |
-
-**Philosophy**: Build what's needed, document what's deferred.
-
----
-
-## Summary: Senior vs Junior Decisions
-
-| Junior Approach | Our Senior Approach |
-|-----------------|---------------------|
-| "Use Kafka because it's popular" | Service Bus because DLQ matters |
-| "Use AKS for credibility" | Container Apps: right-sized |
-| "Strong consistency everywhere" | Session: balanced trade-off |
-| "Single rate limiting" | Two algorithms for defense in depth |
-| "Copy-paste retry logic" | Polly with tuned parameters |
-| "Build everything" | Know what NOT to build |
+## 3. Queue Depth vs. Backpressure
+
+**Scenario**: The "Buffer" problem.
+
+| Strategy | Behavior | Failure Mode |
+| :--- | :--- | :--- |
+| **Unbounded Queue** | Accept everything, process later. | **OOM Kill**. Memory grows until process crashes. Data loss = 100% of buffer. |
+| **Bounded Queue (Blocking)** | Accept until full, then block caller. | **Cascading Latency**. Upstream callers hang. Thread pool exhaustion. |
+| **Bounded Queue (Dropping)** | Accept until full, then drop new (Tail Drop). | **Data Loss**. Events are lost, but system stays alive. |
+| **Synchronous (No Queue)** | Caller waits for DB/Broker. | **Backpressure**. Client is forced to slow down (TCP Window). |
+
+**Decision**: We reverted to **Synchronous (No Queue)**.
+*   **Why**: Given our Single-Node constraint, any memory buffer competes with the Service Bus Emulator for RAM.
+*   **Trade-off**: We force the **Client** to handle the complexity of retries, rather than the **Server** handling the complexity of buffering.

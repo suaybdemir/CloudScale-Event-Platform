@@ -2,194 +2,135 @@
 
 ![System Architecture Diagram](../images/system_architecture_diagram.png)
 
-This document provides a comprehensive technical overview of the CloudScale Event Intelligence Platform architecture, incorporating the latest **.NET 10** stack, **Hot/Cold Storage** strategy, and **Self-Healing** mechanisms.
+This document provides a **Principal-level technical overview** of the CloudScale Event Intelligence Platform. It details the logical architecture, physical deployment limitations, component interactions, and failure propagation models.
+
+> **⚠️ Scope Warning**
+> This architecture describes the **Single-Node Emulator Environment** (Dev/Reference).
+> **Explicit Non-Goals** for this specific deployment include:
+> *   **High Availability (HA)**: Single point of failure (i7-2600 Host).
+> *   **Data Durability > 99.9%**: No RAID/Redundancy. Data lives on single disk.
+> *   **Geo-Redundancy**: No region replication.
 
 ---
 
-## High-Level Architecture
+## 1. Logical Architecture & Data Flow
 
 ```mermaid
 graph TD
-    %% Styling
-    classDef azure fill:#0072C6,stroke:#fff,stroke-width:2px,color:#fff;
-    classDef code fill:#5D4037,stroke:#fff,stroke-width:2px,color:#fff;
-    classDef storage fill:#388E3C,stroke:#fff,stroke-width:2px,color:#fff;
-    classDef analytics fill:#F57C00,stroke:#fff,stroke-width:2px,color:#fff;
-    classDef monitor fill:#D32F2F,stroke:#fff,stroke-width:2px,color:#fff;
+    %% Classes
+    classDef external fill:#eee,stroke:#333,stroke-width:2px;
+    classDef ingestion fill:#e1f5fe,stroke:#01579b,stroke-width:2px;
+    classDef processing fill:#fff3e0,stroke:#e65100,stroke-width:2px;
+    classDef storage fill:#e8f5e9,stroke:#1b5e20,stroke-width:2px;
+    classDef fail fill:#ffebee,stroke:#c62828,stroke-width:2px,stroke-dasharray: 5 5;
 
-    subgraph ClientLayer [Clients]
-        MobileApp(Mobile App)
-        WebApp(Web Dashboard)
+    subgraph External [External World]
+        Client(Client Apps / Load Generator)
     end
 
-    subgraph EdgeLayer [Edge Layer]
-        AFD[Azure Front Door]:::azure
-        WAF[Web App Firewall]:::azure
-        AFD --> WAF
-    end
-
-    subgraph IngestionLayer [Ingestion Layer]
-        LB[Load Balancer / Nginx]:::code
-        API[Ingestion API Cluster]:::code
-        Throttling[Throttling Middleware]:::monitor
+    subgraph Host [Single Node (i7-2600)]
         
-        LB --> Throttling
-        Throttling --> API
+        subgraph Ingestion [Ingestion Layer]
+            Nginx[Nginx Reverse Proxy :5000]:::ingestion
+            API[Ingestion API :8080]:::ingestion
+        end
+
+        subgraph Messaging [ buffering ]
+            SB_Emulator[Service Bus Emulator :5672]:::storage
+        end
+
+        subgraph Processing [Compute]
+            Processor[Event Processor]:::processing
+        end
+
+        subgraph Persistence [Data Layer]
+            Cosmos[Cosmos DB Emulator :8082]:::storage
+            Redis[Redis Cache :6379]:::storage
+        end
+
+        subgraph Observability
+            Dashboard[Dashboard :3001]:::external
+        end
     end
 
-    subgraph MessagingLayer [Messaging Layer]
-        SB[Azure Service Bus - Standard]:::azure
-        Topic[Events Topic]:::azure
-        DLQ[Dead Letter Queue]:::azure
-        
-        SB --> Topic
-        Topic -.-> DLQ
-    end
-
-    subgraph ProcessingLayer [Processing Layer]
-        Worker[Event Processor]:::code
-        Fraud[Fraud Detection Engine]:::code
-        Health[Backpressure Monitor]:::monitor
-        
-        Worker --> Fraud
-        Worker <--> Health
-    end
-
-    subgraph StorageLayer [Data Persistence]
-        Cosmos[Azure Cosmos DB - Hot]:::storage
-        Blob[Azure Blob Storage - Archive]:::storage
-    end
-
-    subgraph AnalyticsLayer [Analytics Layer]
-        Synapse[Azure Synapse Analytics]:::analytics
-        PBI[Power BI Dashboard]:::analytics
-    end
-
-    %% Flows
-    MobileApp --> AFD
-    WebApp --> AFD
-    WAF --> LB
-    API -->|High Throughput| SB
+    %% Data Flow
+    Client -->|HTTP POST JSON| Nginx
+    Nginx -->|Proxy Pass| API
+    API -->|1. Validate & Auth| Redis
+    API -->|2. Sync Publish (AMQP)| SB_Emulator
     
-    Topic -->|Subscription| Worker
+    SB_Emulator -->|Push/Pull Batch| Processor
+    Processor -->|3. Risk Scoring| Redis
+    Processor -->|4. Persist| Cosmos
     
-    Worker -->|Risk Analysis| Cosmos
-    Worker -->|Archiving| Blob
-    Blob -->|Batch Ingest| Synapse
-    Synapse --> PBI
-    
-    %% Feedback Loop (Monitor & Adjust)
-    Health -.->|1. Monitor Queue Depth| SB
-    Health -.->|2. Update Health State| Cosmos
-    Cosmos -.->|3. Read Pressure State| API
-    API -.->|4. Throttling Status 429| Throttling
-    
-    %% Legend
-    linkStyle 10,11,12,13 stroke:#D32F2F,stroke-width:3px;
+    Dashboard -->|Read Live Stats| Redis
+    Dashboard -->|Read History| Cosmos
+
+    %% Failure Modes
+    API -.->|503 Busy| Client
+    SB_Emulator -.->|Timeout/Backpressure| API
+    Cosmos -.->|Circuit Break| Processor
 ```
 
 ---
 
-## Component Deep-Dive
+## 2. Infrastructure Constraints & Decisions
 
-### 1. Ingestion Layer (Edge & API)
+### 2.1 Single-Node Docker Compose (The "Emulator Stack")
+We utilize a **containerized emulator stack** to simulate Azure PaaS services on x86_64 hardware. This decision favors **cost-efficiency and developer velocity** over production fidelity.
 
-**Technology**: Azure Front Door + .NET 10 Minimal API
+*   **Service Bus Emulator**: Simulates Azure Service Bus Standard.
+    *   *Limit*: Theoretical I/O cap ~4,000 msg/sec (observed).
+    *   *Difference*: No real partitioning, purely memory/disk bound.
+*   **Cosmos DB Emulator**: Simulates Azure Cosmos DB SQL API.
+    *   *Limit*: Single-partition.
+    *   *CAP Theorem*: **CP** (Consistency/Partition Tolerance) is theoretical here; essentially a local document store.
 
-**Responsibilities**:
-- **Edge Security**: WAF filters malicious traffic geographically (Front Door).
-- **Smart Throttling**: 
-    - **Token Bucket**: Limits per-IP bursts (10/sec).
-    - **Global Sliding Window**: Limits overall system load (10k/min).
-    - **Adaptive (Feedback)**: Rejects requests when Backpressure Monitor signals overload.
-- **Validation**: FluentValidation ensures payload integrity before queueing.
+### 2.2 Network Architecture & The "Port 8081" Incident
+A critical architectural constraint is the **Host Port Binding**.
 
-**Key Design Decisions**:
-- **Stateless API**: No database dependency for ingestion; purely producing messages to Service Bus for max throughput.
-- **202 Accepted**: API returns immediately after publishing to queue, ensuring <50ms p99 latency.
+*   **Problem**: `Cosmos DB Emulator` listens on port `8081`. On many Linux hosts, `8081` is often claimed by internal processes (McAfee, Java Agents) or zombie Docker bindings (`ipvlan`).
+*   **Root Cause**: Non-deterministic port binding race conditions during `docker compose up`.
+*   **Resolution**: We explicitly bind Cosmos DB to **Host Port 8082** (`8082:8081`).
+    *   *Internal Traffic*: Containers talk to `cosmosdb-emulator:8081` (Docker DNS).
+    *   *External/Dashboard*: Host talks to `localhost:8082`.
 
----
+### 2.3 Nginx Role (Reverse Proxy vs Gateway)
+The `nginx` container exposed on port `:5000` is a **Reverse Proxy**, NOT a full API Gateway.
 
-### 2. Messaging & Reliability
-
-**Technology**: Azure Service Bus (Standard Tier) + Polly
-
-**Features**:
-- **Topics & Subscriptions**: Decouples producers from consumers.
-- **Dead Letter Queue (DLQ)**: Captures poison messages automatically.
-- **Idempotency**: Prevents replay attacks by checking event ID hashes.
-- **Polly Policies**:
-    - **Retry**: Exponential backoff for transient failures.
-    - **Circuit Breaker**: Opens if downstream (Cosmos) fails repeatedly.
+*   **What it does**: Port consolidation (routes `/api` to Ingestion, `/dashboard` to UI).
+*   **What it DOES NOT do**:
+    *   **No WAF**: No SQLi/XSS filtering.
+    *   **No Rate Limiting**: The platform relies on Application-layer limitation (ASP.NET Core RateLimiting).
+    *   **No TLS Termination**: Traffic is plain HTTP inside the host.
 
 ---
 
-### 3. Processing Layer
+## 3. Failure Propagation & Resilience
 
-**Technology**: .NET Worker Service (BackgroundService)
+### 3.1 Failure Mode: "The Service Bus Bottleneck"
+If the **Service Bus Emulator** reaches its I/O limit (approx 4k RPS):
+1.  **Ingestion API** operations (`SendAsync`) start timing out (>10s).
+2.  **Backpressure** builds up in Kestrel thread pool.
+3.  **Client Response**: The API returns `503 Service Unavailable` or simply drops the connection (ClientConnectorError).
+    *   *Intent*: Load shedding to protect the compute node from OOM.
 
-**Pipeline**:
-1.  **Receive**: Batched prefetch from Service Bus.
-2.  **Fraud Detection**: 
-    - **Velocity Check**: >10 events/min from same IP -> Flagged.
-    - **Geo-Check**: Impossible travel detection.
-    - **Temporal Integrity**: Handles late-arriving events correctly based on `OccurrenceTime`.
-3.  **Persistence (Dual Write)**:
-    - **Hot Path**: Writes to Cosmos DB (Live Dashboard).
-    - **Cold Path**: Writes to Azure Blob Storage (Archiving).
-4.  **Complete**: Acks message only after successful persistence.
-
-**Synthetic Watchdog (Canary)**:
-- Injects a known "Fraud" event every 60s.
-- Verifies that the entire pipeline (Ingestion -> Queue -> Fraud Engine -> Alert) is functioning.
-- Triggers SEV-1 alert if Canary is not detected.
+### 3.2 Failure Mode: "Cosmos DB Outage"
+If **Cosmos DB Emulator** fails (e.g. "Created" state zombie):
+1.  **Event Processor** cannot persist data.
+2.  **Circuit Breaker (Polly)** opens.
+3.  **Processor** stops acknowledging messages to Service Bus.
+4.  **Service Bus** queue depth increases immediately.
+5.  **Dashboard** shows "Zero Processed Events" but "High Queue Depth".
 
 ---
 
-### 4. Storage Strategy (Hot/Cold)
+## 4. Operational Boundaries
 
-| Feature | Hot Storage (Cosmos DB) | Cold Storage (Blob Archive) |
-| :--- | :--- | :--- |
-| **Purpose** | Real-time Dashboard, O(1) Lookups | Long-term Compliance, Batch Analytics |
-| **Retention** | 30 Days (TTL) | Indefinite (7+ Years) |
-| **Cost** | High ($$$) | Low ($) |
-| **Access** | Milliseconds | Minutes/Hours (Rehydration) |
-| **Partitioning** | `/TenantId` | `/yyyy/MM/dd/EventId` |
+| Component | Standard | Boundary / Limit | Behavior at Limit |
+| :--- | :--- | :--- | :--- |
+| **Ingestion** | Synchronous | ~4,200 RPS | Timeouts / 5xx Errors |
+| **Compute** | Single Core | 100% CPU | Latency spikes (p99 > 5s) |
+| **Monitoring** | Real-time | < 1s Lag | Lag increases linearly with Load |
 
----
-
-### 5. Feedback Loop (System Health)
-
-**The "Nervous System" of the platform.**
-
-1.  **Monitor**: `BackpressureMonitor` service checks Service Bus queue depth.
-2.  **Decide**:
-    - Queue < 1,000: **Healthy**.
-    - Queue > 1,000: **Degraded** (Throttling activated).
-    - Queue > 10,000: **Unhealthy** (Critical Throttling).
-3.  **Signal**: Updates a singleton document in Cosmos DB (`system:health`).
-4.  **Act**: Ingestion API reads this signal (cached 10s) and starts returning `429 Too Many Requests` proactively.
-
----
-
-## Observability & SRE
-
-### Service Level Objectives (SLOs)
-- **Availability**: 99.9% (approx 43m downtime/month).
-- **Latency (Ingest)**: p99 < 200ms.
-- **Latency (Process)**: p99 < 2s.
-
-### Alerting Matrix
-| Severity | Trigger | Response |
-| :--- | :--- | :--- |
-| **Critical** | Canary Failure, Queue > 50k | Page On-Call |
-| **Warning** | Queue > 10k, 429 Spike | Slack Alert |
-| **Info** | Deployment, Scaling | Log Only |
-
----
-
-## Security
-
-- **Network**: All internal traffic isolated. Public access only via Front Door.
-- **Identity**: Managed Identity for Service Bus/Cosmos access (No keys in code).
-- **Encryption**: TLS 1.3 in transit, AES-256 at rest.
+> **Principal Note**: This architecture is designed for **correctness verification**, not maximum throughput. For production loads >10k RPS, the "Emulator Stack" must be replaced with **Azure PaaS (Tier 1/Standard)** resources and the Compute layer moved to **Kubernetes (AKS)** for horizontal scaling.

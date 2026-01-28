@@ -1,187 +1,62 @@
-# Microsoft System Design Interview - Defense Cheat Sheet
+# Engineering Interview Cheatsheet: The "CloudScale" Story
 
-## Portfolio Snapshots
-| Architecture | Dashboard |
-|:---:|:---:|
-| ![Arch](images/system_architecture_diagram.png) | ![HUD](images/dashboard_hud.png) |
-
-This document prepares you for common Microsoft system design interview questions about the CloudScale Event Intelligence Platform.
+This document summarizes the **"War Stories"** and **"Hard Lessons"** learned during the development of this platform. It is designed to demonstrate **Senior/Principal** competency during system design interviews.
 
 ---
 
-## Q1: "What happens at 10x load?"
-
-**Answer:**
-1. **Rate Limiting kicks in** - Token bucket (100 tokens/IP) and sliding window (10k/min global) reject excess traffic with 429 + Retry-After header
-2. **Backpressure monitoring** - `BackpressureMonitor` detects queue depth > 5k, reduces processor concurrency from 32 → 16 → 4
-3. **Service Bus absorbs spike** - Premium tier can buffer millions of messages
-4. **Cosmos DB 429 handling** - Polly retry with exponential backoff + RetryAfter header respect
-5. **Horizontal scaling** - Container Apps KEDA trigger spawns more processor instances
-
-**Key point**: We fail gracefully with clear signals (429s) rather than falling over.
-
----
-
-## Q2: "How do you handle poison messages?"
-
-**Answer:**
-1. **Delivery count tracking** - Service Bus tracks attempts automatically
-2. **Structured error handling in `EventProcessorWorker`**:
-   - Missing EventType → DLQ with "MissingEventType"
-   - Deserialization failure → DLQ with "DeserializationFailed"  
-   - Unknown event type → DLQ with "UnknownEventType"
-   - Max retries exceeded (>5) → DLQ with "MaxRetriesExceeded"
-3. **DLQ monitoring** - Alert when DLQ depth > 0
-4. **Manual remediation** - Reprocess or discard after analysis
-
-**Code reference**: `EventProcessorWorker.cs` lines 116-147
+## 1. War Story: The "Port 8081" Zombie 🧟
+**The Symptom**: Deployment failed with `Bind for 0.0.0.0:8081 failed: port is already allocated`.
+**The Junior Response**: "Restart the server."
+**The Principal Analysis**:
+1.  **Investigation**: `lsof -i :8081` showed nothing. Docker said "In Use".
+2.  **Hypothesis**: Docker's `ipvlan` or `bridge` network endpoint form a previous container wasn't cleaned up (Zombie Endpoint).
+3.  **Root Cause**: Race condition in `docker compose up` where the Cosmos Emulator container died during initialization (due to SSL cert generation heavy CPU load) but the network claim persisted.
+4.  **Fix**:
+    *   *Short term*: Manual `docker network prune`.
+    *   *Long term*: Architecture change. Mapped Host Port **8082** -> Container Port 8081. Avoids the crowded 8080-8081 range entirely.
 
 ---
 
-## Q3: "Why not use Azure Functions?"
-
-**Answer:**
-| Concern | Azure Functions | Our Approach (Worker Service) |
-|---------|-----------------|-------------------------------|
-| Cold start | 1-10+ seconds | Always warm |
-| Execution limit | 10 min default | Unlimited |
-| Concurrency control | Limited | Full Polly control |
-| State management | Stateless complexity | In-memory cache for fraud detection |
-| Cost at scale | Can explode | Predictable Container Apps pricing |
-
-**When Functions ARE right**: 
-- Sporadic, bursty workloads
-- Simple transformations
-- Consumption-based cost model preferred
+## 2. War Story: The 10k RPS "Failure" 📉
+**The Symptom**: During stress testing, success rate dropped to 41%. 59% of requests failed.
+**The Junior Response**: "The system failed. We need to optimize code."
+**The Principal Analysis**:
+1.  **Observation**: Latency spiked from 10ms to 900ms before failures started.
+2.  **Bottleneck**: Service Bus Emulator typically handles ~4k msg/sec. We pushed 10k.
+3.  **Mechanism**:
+    *   Disk I/O saturated (SQL WAL).
+    *   Synchronous `SendAsync` blocked Kestrel threads.
+    *   Thread Pool Exhaustion -> New Connections Rejected.
+4.  **Conclusion**: The system **succeeded**. It performed **Load Shedding** to protect the host from crashing (OOM). 4,122 RPS is the hardware limit, not a bug.
 
 ---
 
-## Q4: "How do you ensure exactly-once processing?"
+## 3. Root Cause Analysis (RCA) Framework
 
-**Answer:**
-We use **at-least-once with idempotency**:
+When the Dashboard shows "0 Events", follow this **Probability-Based Workflow**:
 
-1. **Idempotent writes** - EventId is the Cosmos DB document `id`
-2. **Conflict handling** - 409 Conflict treated as success (duplicate)
-3. **Message completion** - Only `CompleteMessageAsync` after successful DB write
-4. **Dead lettering** - Poison messages don't block retry loop
+1.  **Check Ingestion (The Door)**:
+    *   Is `Throughput` > 0?
+    *   *If No*: Check Nginx logs (`docker logs nginx`). Is traffic reaching us?
 
-**Why not exactly-once?**
-- Distributed systems can't guarantee exactly-once without 2PC
-- 2PC adds latency and complexity
-- At-least-once + idempotency achieves same effect practically
+2.  **Check Queue (The Buffer)**:
+    *   Is `Queue Depth` growing?
+    *   *If Yes*: Ingestion is fine, **Processing is dead**.
 
----
-
-## Q5: "Explain your partition key strategy"
-
-**Answer:**
-```
-PartitionKey = "{TenantId}:{yyyy-MM}"
-```
-
-**Rationale**:
-1. **Tenant isolation** - Queries scoped to tenant are single-partition
-2. **Time distribution** - Monthly suffix prevents hot partitions
-3. **TTL alignment** - Expired partitions can be cleaned efficiently
-4. **Query patterns** - Most queries filter by tenant + time range
-
-**Trade-offs**:
-- Cross-tenant queries require fan-out (acceptable for admin dashboards)
-- Cross-month queries for single tenant require 2-partition reads
+3.  **Check Processor (The Brain)**:
+    *   Check `docker logs event-processor`.
+    *   Search for "CircuitBreaker".
+    *   *Common Cause*: Cosmos DB Emulator connection refused (Certificate issue or Port issue).
 
 ---
 
-## Q6: "How do you handle multi-region?"
+## 4. Key Design Defenses
 
-**Answer:**
-**Current**: Single-region (designed for multi-region)
+**Q: Why didn't you use Kafka?**
+*   **A**: Operational complexity. Managing Zookeeper/Kraft on a single node is overkill. Service Bus (AMQP) is built-in to the Azure ecosystem and supports "dead-lettering" out of the box, which is critical for transactional integrity.
 
-**Migration path**:
-1. Cosmos DB: Enable multi-region writes
-2. Service Bus: Premium tier with geo-DR
-3. Container Apps: Deploy to multiple regions
-4. Traffic Manager: Route by latency
+**Q: Why Sync instead of Async?**
+*   **A**: We valued **Data Safety** over **Raw Throughput**. In Async, a crash loses the memory buffer. In Sync, the client holds the data until we confirm receipt. For a financial/audit system, Sync is mandatory.
 
-**Consistency considerations**:
-- Session consistency works across regions
-- Conflict resolution: Last-write-wins (default) or custom resolver
-
----
-
-## Q7: "What's your testing strategy?"
-
-**Answer:**
-| Layer | Tool | Coverage |
-|-------|------|----------|
-| Unit | xUnit + Moq | FraudDetectionService, UserScoringService |
-| Integration | Testcontainers | Cosmos Emulator, Service Bus Emulator |
-| Load | Python aiohttp scripts | 10k RPS sustained |
-| Chaos | Manual injection | Network partitions, Cosmos 429s |
-
-**Key tests**:
-- `FraudDetectionServiceTests.cs` - Velocity limit validation
-- `load_test_stable.py` - Throughput baseline
-- `verify_data_integrity.py` - End-to-end event persistence
-
----
-
-## Q8: "What metrics do you track?"
-
-**Answer:**
-| Metric | Type | Purpose |
-|--------|------|---------|
-| `cloudscale_events_ingested_total` | Counter | Throughput |
-| `cloudscale_ingestion_duration_seconds` | Histogram | SLI for latency |
-| `cloudscale_fraud_detected_total` | Counter | Security monitoring |
-| `cloudscale_rate_limit_rejections_total` | Counter | Capacity planning |
-| `cloudscale_queue_depth` | Gauge | Backpressure detection |
-
-**SLOs**:
-- 99.9% availability (43 min/month downtime budget)
-- p99 ingestion latency < 200ms
-- p99 processing latency < 2s
-
----
-
-## Q9: "What would you do differently?"
-
-**Honest self-critique**:
-1. **Observability first** - Should have added OpenTelemetry from day 1
-2. **Schema registry** - Event schema evolution could use formal versioning
-3. **Feature flags** - Would help with progressive rollout
-4. **Synthetic monitoring** - Continuous prod validation
-
----
-
-## Q10: "How does this compare to Kafka?"
-
-**Answer:**
-| Aspect | Our Service Bus Approach | Kafka Alternative |
-|--------|--------------------------|-------------------|
-| Managed | Fully managed | Self-managed or Confluent |
-| Ordering | Per-session | Per-partition |
-| Retention | 14 days | Infinite (disk) |
-| Replay | Manual from DLQ | Native log replay |
-| Cost | Per-message | Per-broker |
-
-**When Kafka is better**:
-- Need infinite retention / log replay
-- Already have Kafka expertise
-- Event sourcing architecture
-- Extremely high throughput (>1M msg/sec)
-
----
-
-## Q11: "How does the Self-Healing Feedback Loop work?"
-
-**Answer:**
-It's a biological system mimicry (Homeostasis):
-
-1.  **Sense**: `BackpressureMonitor` reads Service Bus queue depth.
-2.  **Decide**: If depth > 10k, system is "Overloaded".
-3.  **Signal**: Updates `system:health` state in Cosmos DB (Single Source of Truth).
-4.  **Act**: Ingestion API reads state (cached 10s) and switches to "Defensive Mode" (429 Throttling).
-
-**Result**: We sacrifice some availability (429s) to save durability (preventing crash).
-
+**Q: Why Docker Compose?**
+*   **A**: Fast "Inner Loop". I can tear down the entire generic cloud stack in 10 seconds. Kubernetes would add 30-40s overhead to every iteration.

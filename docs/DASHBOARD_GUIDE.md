@@ -1,38 +1,49 @@
-# CloudScale Cyber-HUD Dashboard Guide
+# Dashboard Operator Guide
 
-![Cyber-HUD Dashboard](images/dashboard_hud.png)
+**Access URL**: `http://localhost:3001`
 
-The CloudScale Dashboard is designed as a mission-control interface for high-velocity event systems. It provides real-time visibility into ingestion rates, system health, and data persistence.
+The Operations Dashboard provides real-time visibility into the system's "Nervous System". It is designed for **SREs** and **Operators**, not Business Analysts.
 
-## 1. Primary Indicators
+---
 
-### 🚀 Throughput Gauge (The "Speedometer")
-The central element of the dashboard. It visualizes the current ingestion rate against the system's baseline capacity.
-*   **Normal Operation (Green/Purple):** System is running within comfortable limits (0 - 100% Load).
-*   **Overload State (Pulsing Red):** When traffic exceeds the baseline (e.g., >2000 events/sec), the gauge needle pushes into the red zone and the outer ring pulses. This indicates the system is autoscaling or under stress.
-*   **Passively Decaying:** When traffic stops, the needle smoothy returns to exactly 0, confirming the "Silence" of the system.
+## 1. Metric Sources & Lag
 
-### 📊 Metric Cards
-*   **Total Events:** A monotonically increasing counter of all events successfully ingested since startup. Watch this to confirm data flow.
-*   **Success Rate:** The ratio of valid to invalid events.
-    *   **100% (Green):** System is healthy.
-    *   **<99% (Yellow/Red):** Indicates rejected events (bad schema) or 500 errors.
+The dashboard aggregates data from two distinct consistency domains. Understanding this is critical for debugging.
 
-## 2. Verification Modules
+| Widget | Source | Latency/Lag | Purpose |
+| :--- | :--- | :--- | :--- |
+| **Queue Depth** | Service Bus (Direct) | Real-time | **Immediate Health**. If > 0, system is backing up. |
+| **Throughput** | Redis (Atomic Counters) | < 1s | **Traffic Check**. "Are we receiving data?" |
+| **Risk Leaderboard** | Redis (Sorted Sets) | < 1s | **Security**. "Who is attacking us?" |
+| **Verification Table** | Cosmos DB (Query) | ~2-5s | **Consistency**. "Did data actually land on disk?" |
 
-### 🕵️ Audit Log (Database Verification)
-Located in the bottom or dedicated tab, this is the "Is it real?" check.
-*   **Live Stream:** Displays the last 20 events fetched directly from the backend memory/database.
-*   **Latency Check:** Compare the timestamp in this log with your current time to verify end-to-end latency.
-*   **Risk Scores:** Visible proof that our AI Fraud Detection scanned the event.
+> **Operational Note**: It is normal for "Verification Table" to trail behind "Throughput" by a few seconds. If this lag grows > 1 minute, the **Processing Layer** is likely stuck or crashed.
 
-### 🚨 Fraud Radar
-*   **Risk Score**: A value from 0-100 assigned to every event.
-*   **Status Indicators**:
-    *   🟢 **Normal (0-40):** Standard user behavior.
-    *   🟠 **Suspicious (40-80):** High velocity or impossible travel.
-    *   🔴 **Critical (>80):** Confirmed bot or attack signature.
+---
 
-## 3. System Health
-*   **Processors:** The number of active `event-processor` replicas (e.g., 3).
-*   **Queue Depth:** Should remain near 0. If it climbs, ingestion is outpacing processing.
+## 2. Key Indicators
+
+### A. "The Pulse" (Events/Sec)
+*   **Normal**: 0 - 4,000.
+*   **Warning**: > 4,000 (Approaching Emulator Limit).
+*   **Critical**: 0 (System Down) or Flatline at 4,112 (Saturation).
+
+### B. Queue Depth
+*   **Healthy**: 0-100 (Transient bursts).
+*   **Degraded**: 100-1,000 (Processing slower than Ingestion).
+*   **Critical**: > 1,000 (Consumers stalled / Backpressure failing).
+    *   *Action*: Check `docker logs event-processor`.
+
+### C. Live Security Alerts
+Displays "Bypassed" risks or high-confidence fraud detections.
+*   **Red Bar**: Confidence > 80%. Immediate blocking usually active.
+
+---
+
+## 3. Database Verification Tool
+
+The "Blue Button" (`Database Verification`) triggers a manual consistency check.
+1.  It queries the last 50 claimed "Accepted" events from the API logs.
+2.  It actively queries Cosmos DB for these IDs.
+3.  **Green Status**: Event found on disk.
+4.  **Red Status**: Event missing (Data Loss Risk).

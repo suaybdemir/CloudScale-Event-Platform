@@ -1,112 +1,58 @@
-# SLI / SLO / Error Budget Definitions
+# Service Level Objectives (SLO) & Error Budgets
 
-![SLO Dashboard](images/sli_slo_dashboard.png)
+This document defines the reliability targets and the operational policies triggered when those targets are missed.
 
-This document defines the Service Level Indicators (SLIs), Service Level Objectives (SLOs), and Error Budgets for the CloudScale Event Intelligence Platform.
+---
 
-## Service Level Indicators (SLIs)
+## 1. Definitions
 
-| SLI | Description | Measurement |
-|-----|-------------|-------------|
-| **Availability** | Percentage of successful requests (non-5xx) | `1 - (5xx_responses / total_responses)` |
-| **Ingestion Latency** | Time from API request to Service Bus publish | `cloudscale_ingestion_duration_seconds` p99 |
-| **Processing Latency** | Time from message receive to Cosmos DB write | `cloudscale_processing_duration_seconds` p99 |
-| **Throughput** | Events successfully ingested per minute | `rate(cloudscale_events_ingested_total[1m])` |
-| **Fraud Detection Accuracy** | True positive rate for fraud detection | Manual audit sampling |
-| **Durability (Cold Store)** | Success rate of Blob Storage archival | `archival_success / total_processed` |
-| **Capacity Saturation** | Percentage of requests throttled (429) | `429_responses / total_requests` |
+*   **SLI (Indicator)**: Doing the math. (e.g., `(Good Req / Total Req) * 100`).
+*   **SLO (Objective)**: The target. (e.g., `99.9%`).
+*   **Error Budget**: The allowed failure room. (e.g., `0.1%` or `43 minutes` per month).
 
-## Service Level Objectives (SLOs)
+---
 
-| SLO | Target | Window | Priority |
-|-----|--------|--------|----------|
-| **Availability** | 99.9% | 30 days rolling | P0 |
-| **Ingestion Latency p99** | < 200ms | 30 days rolling | P1 |
-| **Processing Latency p99** | < 2s | 30 days rolling | P1 |
-| **Throughput** | ≥ 10,000 events/min | Peak hours | P1 |
-| **Error Rate** | < 0.1% | 30 days rolling | P0 |
+## 2. Defined SLOs
 
-## Error Budget Calculation
+### A. Ingestion Availability
+*   **Definition**: Percentage of requests returning `202 Accepted` vs `5xx`.
+*   **Target**: **99.9%** (Monthly).
+*   **Budget**: ~43 minutes of unavailability allowed per month.
+*   **Note**: `429 Too Many Requests` (Rate Limit) are **Excluded** from the error count (they are "Expected Behavior" for abusive clients).
 
-### Monthly Error Budget (30 days)
+### B. Ingestion Latency
+*   **Definition**: Time from Request Header received to Response Header sent.
+*   **Target**: **p99 < 200ms**.
+*   **Rationale**: Mobile clients will timeout if > 2s. We need a safety margin.
 
-| SLO Target | Allowed Downtime | Allowed Failures (at 10k events/min) |
-|------------|------------------|--------------------------------------|
-| 99.9% | 43.2 minutes | ~4,320 failed events |
-| 99.95% | 21.6 minutes | ~2,160 failed events |
-| 99.99% | 4.32 minutes | ~432 failed events |
+### C. End-to-End Freshness (Lag)
+*   **Definition**: Time from `Event.Timestamp` to `CosmosDB.InsertTimestamp`.
+*   **Target**: **p99 < 5 seconds**.
+*   **Rationale**: Dashboard needs "Real-Time" feel.
 
-### Error Budget Policies
+---
 
-1. **Budget > 50% remaining**: Normal development velocity
-2. **Budget 25-50%**: Increased focus on reliability
-3. **Budget < 25%**: Feature freeze, reliability focus only
-4. **Budget exhausted**: Incident response mode
+## 3. Operational Policies
 
-## Alerting Rules
+### Policy: "Budget Burn"
+What happens when we burn through our error budget?
 
-### Critical (P0) - PagerDuty
+1.  **Burn Rate > 10% / hour**:
+    *   **Action**: Page On-Call.
+    *   **Response**: Check "Zombie Containers" or "Port Conflicts".
 
-| Alert | Condition | Action |
-|-------|-----------|--------|
-| `HighErrorRate` | Error rate > 5% for 5min | Page on-call |
-| `ServiceDown` | No successful requests for 2min | Page on-call |
-| `QueueBacklog` | Queue depth > 50,000 for 10min | Page on-call |
+2.  **Budget Exhausted (0% remaining)**:
+    *   **Policy**: **HALT ALL FEATURE DEPLOYMENTS**.
+    *   **Focus**: Sprint scope shifts 100% to **Reliability & Technical Debt** until budget resets (next month).
+    *   **Override**: Only VP of Engineering can authorize a deployment during Budget Exhaustion (Emergency Security Fixes only).
 
-### Warning (P1) - Slack
+---
 
-| Alert | Condition | Action |
-|-------|-----------|--------|
-| `HighLatency` | p99 > 500ms for 10min | Slack #alerts |
-| `QueueGrowth` | Queue depth > 10,000 | Slack #alerts |
-| `RateLimitSpike` | 429 responses > 100/min | Slack #alerts |
-| `FraudSpike` | Fraud detections > 50/min | Slack #security |
+## 4. Alerting Thresholds (Prometheus/AppInsights)
 
-### Info - Dashboard Only
-
-| Alert | Condition |
-|-------|-----------|
-| `ElevatedLatency` | p99 > 300ms |
-| `ApproachingCapacity` | CPU > 70% |
-| `CircuitBreakerOpen` | Any circuit opened |
-
-## Monitoring Dashboards
-
-### Required Panels
-
-1. **Overview**
-   - Request rate (RPM)
-   - Error rate (%)
-   - p50/p95/p99 latency
-
-2. **Event Pipeline**
-   - Events ingested/processed
-   - Queue depth over time
-   - Fraud detection rate
-
-3. **Infrastructure**
-   - CPU/Memory by service
-   - Cosmos RU consumption
-   - Service Bus message throughput
-
-4. **SLO Burn Rate**
-   - Error budget remaining
-   - Burn rate (fast/slow)
-   - SLO compliance %
-
-## Incident Response
-
-### Severity Classification
-
-| Severity | Impact | Response Time | Example |
-|----------|--------|---------------|---------|
-| SEV1 | Complete outage | 5 min | API returning 100% 5xx |
-| SEV2 | Partial outage | 15 min | Processing backlog > 1hr |
-| SEV3 | Degraded | 1 hr | Elevated latency |
-| SEV4 | Minor | 24 hr | Single tenant impact |
-
-### Escalation Path
-
-1. On-call Engineer (SEV1-3)
-2. Team Lead (SEV1-2, or SEV3 > 30min)
-3. Engineering Manager (SEV1 > 15min)
+| Alert Name | Query Logic | Duration | Severity |
+| :--- | :--- | :--- | :--- |
+| `HighErrorRate` | `FailureRate > 1%` | 5m | **P1 (Page)** |
+| `NearSaturation` | `Throughput > 3,800 RPS` | 5m | **P2 (Warn)** |
+| `ConsumerLag` | `QueueDepth > 2,000` | 10m | **P2 (Warn)** |
+| `DeadLetter` | `DLQ_Count > 0` | Immediate | **P3 (Ticket)** |

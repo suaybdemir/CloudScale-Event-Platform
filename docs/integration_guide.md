@@ -1,68 +1,76 @@
-# CloudScale Integration Guide
+# System Integration Guide
 
-![API Architecture](images/api_integration_flow.png)
+This guide details how external clients (Mobile Apps, Web Frontends, Third-Party Systems) should integrate with the CloudScale Ingestion API.
 
-This guide explains how to configure your own frontend and backend systems to integrate with the CloudScale Event Intelligence Platform.
-
-## 1. Backend Configuration (API & Processor)
-
-The backend components (Ingestion API and Event Processor) are configured via `appsettings.json` or Environment Variables.
-
-### Connection Strings
-You must provide connection details for Azure Service Bus and Cosmos DB.
-
-**Environment Variables (Recommended for Docker):**
-- `ServiceBus__ConnectionString`: Full connection string (e.g., `Endpoint=sb://...;SharedAccessKey...`)
-- `ServiceBus__QueueName`: Name of the ingestion queue (default: `events-ingestion`)
-- `CosmosDb__Endpoint`: Your Cosmos DB URI (e.g., `https://my-cosmos.documents.azure.com:443/`)
-- `CosmosDb__AccountKey`: Primary/Secondary key for authentication
-- `CosmosDb__DatabaseName`: Database name (default: `EventsDb`)
-
-### Platform Limits
-- `Kestrel__Limits__MaxConcurrentConnections`: Sets the `Max Concurrent` metric displayed on the dashboard.
-- `RateLimiting__TokensPerSecond`: Controls the API firewall capacity.
+> **Protocol**: HTTP/1.1 REST
+> **Format**: JSON (CloudEvents v1.0 Spec)
+> **Auth**: API Key (Header: `X-Api-Key`)
 
 ---
 
-## 2. Frontend Configuration (Dashboard)
+## 1. Event Payload Schema
 
-The React dashboard needs to know where to find the Ingestion API to fetch its telemetry data.
+We strictly adhere to the **CloudEvents v1.0** specification. Clients MUST send valid CloudEvents.
 
-**Environment Variable:**
-- `VITE_API_URL`: The full URL to the `/api/dashboard` endpoint of your Ingestion API.
-  *   *Example:* `http://your-api-domain.com/api/dashboard`
-
----
-
-## 3. Integrating Your Data (Event Types)
-
-To see data on the dashboard, your applications must send events to the `/api/events` endpoint of the Ingestion API.
-
-### Required Base Fields for All Events
+### 1.1 JSON Structure
 ```json
 {
-  "eventId": "uuid-string",
-  "eventType": "one_of_the_types_below",
-  "correlationId": "tracking-id",
-  "tenantId": "your-org-id",
-  "userId": "user-123",
-  "createdAt": "2024-01-27T12:00:00Z"
+  "specversion": "1.0",
+  "type": "com.cloudscale.pageview",
+  "source": "/mobile/ios/v2.1",
+  "id": "a1b2c3d4-e5f6-7890",
+  "time": "2026-01-28T10:00:00Z",
+  "datacontenttype": "application/json",
+  "data": {
+    "userId": "user_123",
+    "pageUrl": "/checkout",
+    "meta": {
+        "device": "iPhone 13"
+    }
+  }
 }
 ```
 
-### Specific Event Payloads
-Our system is pre-configured to recognize and categorize these types:
-
-| Event Type | Additional Required Fields | Dashboard Placement |
+### 1.2 Field Definitions
+| Field | Requirement | Description |
 | :--- | :--- | :--- |
-| `page_view` | `"url": "/path"` | Event Distribution |
-| `user_action` | `"actionName": "click"` | Event Distribution |
-| `purchase` | `"actionName": "sale", "amount": 99.99` | Event Distribution |
-| `check_cart_status`| Base fields only | Event Distribution |
+| `specversion` | **Mandatory** | Must be `1.0`. |
+| `type` | **Mandatory** | Classification (e.g., `com.cloudscale.pageview`, `com.cloudscale.transaction`). |
+| `source` | **Mandatory** | URI identifying the producer (used for Risk Scoring). |
+| `id` | **Mandatory** | **Unique UUID**. Used for **Idempotency**. |
+| `data` | Optional | The actual business payload. |
 
 ---
 
-## 4. Deployment Check-list
-1.  **Service Bus**: Ensure the queue specified in `ServiceBus__QueueName` exists.
-2.  **Cosmos DB**: The system will attempt to auto-initialize the database/container if it doesn't exist.
-3.  **CORS**: Ensure `VITE_API_URL` is allowed in the API's CORS policy (configured in `Program.cs`).
+## 2. Idempotency & Retries
+
+**The Principle of Exactly-Once Processing starts with the Client.**
+
+1.  **Unique ID**: The Client MUST generate a generic UUID for the `id` field.
+2.  **Retry Logic**: If the API returns `5xx` or `429`, the Client MUST retry the **same payload** with the **same ID**.
+3.  **Server Behavior**:
+    *   If `id` is new: Process and return `202 Accepted`.
+    *   If `id` exists in cache (10m): Return `202 Accepted` (or `409` if configured) and **discard** the duplicate.
+    *   **Result**: Safe to retry indefinitely.
+
+---
+
+## 3. Response Codes
+
+| Status | Meaning | Client Action |
+| :--- | :--- | :--- |
+| **202 Accepted** | Event queued. Not yet persisted. | **Success**. Do not retry. |
+| **400 Bad Request** | Invalid Schema / Validation Fail. | **Fix Logic**. Do not retry. |
+| **401 Unauthorized** | Missing/Invalid API Key. | **Fix Config**. |
+| **429 Too Many Requests** | Global/IP Rate Limit Hit. | **Backoff**. Retry after `Retry-After` header. |
+| **503 Service Unavailable** | Queue Full / System Saturation. | **Backoff**. Retry exponentially (max 5s). |
+
+---
+
+## 4. Endpoints
+
+### Production (Load Balanced)
+`POST https://api.cloudscale.com/ingest`
+
+### Local Emulator (Nginx Proxy)
+`POST http://192.168.0.10:5000/api/ingest`
