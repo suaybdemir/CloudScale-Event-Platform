@@ -1,6 +1,6 @@
 # System Architecture
 
-![System Architecture Diagram](../images/system_architecture_diagram.png)
+![System Architecture Diagram](images/system_architecture_diagram.png)
 
 This document provides a **Principal-level technical overview** of the CloudScale Event Intelligence Platform. It details the logical architecture, physical deployment limitations, component interactions, and failure propagation models.
 

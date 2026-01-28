@@ -1,6 +1,6 @@
 # ☁️ CloudScale Event Intelligence Platform - Project Details
 
-![System Architecture](../images/system_architecture_diagram.png)
+![System Architecture](images/system_architecture_diagram.png)
 
 This document serves as the **Operational and Technical Manifest** for the CloudScale Platform. It details the project identity, verified capabilities, and technical mandates.
 
