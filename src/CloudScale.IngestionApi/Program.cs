@@ -269,12 +269,11 @@ try
     }
 
     app.Run();
-}
-catch (Exception ex)
-{
-    Log.Fatal(ex, "Application start-up failed");
+
 }
 finally
 {
     Log.CloseAndFlush();
 }
+
+public partial class Program { }
