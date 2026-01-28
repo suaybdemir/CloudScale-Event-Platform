@@ -9,5 +9,6 @@
     <Project Path="tests/CloudScale.EventProcessor.Tests/CloudScale.EventProcessor.Tests.csproj" />
     <Project Path="tests/CloudScale.IngestionApi.Tests/CloudScale.IngestionApi.Tests.csproj" />
     <Project Path="tests/CloudScale.Integration.Tests/CloudScale.Integration.Tests.csproj" />
+    <Project Path="tests/CloudScale.Shared.Tests/CloudScale.Shared.Tests.csproj" />
   </Folder>
 </Solution>
