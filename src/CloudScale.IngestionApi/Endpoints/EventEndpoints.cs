@@ -10,8 +10,8 @@ public static class EventEndpoints
 {
     public static void MapEventEndpoints(this IEndpointRouteBuilder app)
     {
-        var group = app.MapGroup("/api/events")
-            .WithTags("Events");
+        var group = app.MapGroup("/api/ingest") // Standardized route
+            .WithTags("Ingestion");
 
         group.MapPost("/", async (
             [FromBody] JsonElement eventPayload,
@@ -27,27 +27,39 @@ public static class EventEndpoints
         {
             if (healthProvider.IsThrottlingEnabled)
             {
-                return Results.StatusCode(429);
+                return Results.StatusCode(StatusCodes.Status429TooManyRequests);
             }
 
-            if (!eventPayload.TryGetProperty("eventType", out var typeProp))
+            // CloudEvents Support: Try 'type' then 'eventType'
+            string? eventType = null;
+            if (eventPayload.TryGetProperty("type", out var typeProp)) eventType = typeProp.GetString();
+            else if (eventPayload.TryGetProperty("eventType", out var etProp)) eventType = etProp.GetString();
+
+            if (string.IsNullOrEmpty(eventType))
             {
                 stats.RecordFailure();
-                return Results.BadRequest(new { error = "Missing eventType" });
+                return Results.BadRequest(new { error = "Missing event type (should be 'type' or 'eventType')" });
             }
 
-            var eventType = typeProp.GetString();
+            // Map CloudEvents 'id' if present, otherwise handle inside EventBase
+            string? eventId = null;
+            if (eventPayload.TryGetProperty("id", out var idProp)) eventId = idProp.GetString();
+
             EventBase? eventToProcess = null;
             FluentValidation.Results.ValidationResult? validationResult = null;
+            
+            // Standardize types (e.g. com.cloudscale.pageview -> page_view)
+            var normalizedType = eventType.Replace("com.cloudscale.", "").Replace(".", "_").ToLowerInvariant();
 
             try 
             {
                 var json = eventPayload.GetRawText();
                 var options = new JsonSerializerOptions { PropertyNameCaseInsensitive = true };
 
-                switch (eventType)
+                switch (normalizedType)
                 {
                     case "page_view":
+                    case "pageview":
                         var pageEvent = JsonSerializer.Deserialize<PageViewEvent>(json, options);
                         if (pageEvent == null) return Results.BadRequest();
                         validationResult = await pageViewValidator.ValidateAsync(pageEvent, ct);
@@ -55,6 +67,7 @@ public static class EventEndpoints
                         break;
                     
                     case "user_action":
+                    case "useraction":
                         var userEvent = JsonSerializer.Deserialize<UserActionEvent>(json, options);
                         if (userEvent == null) return Results.BadRequest();
                         validationResult = await userActionValidator.ValidateAsync(userEvent, ct);
@@ -93,17 +106,23 @@ public static class EventEndpoints
 
             if (eventToProcess != null)
             {
-                if (string.IsNullOrEmpty(eventToProcess.CorrelationId))
+                // Override EventId if CloudEvent 'id' was provided
+                if (!string.IsNullOrEmpty(eventId))
                 {
-                     eventToProcess = eventToProcess with { CorrelationId = context.TraceIdentifier };
+                    // Using reflection/trick if Init-only, but EventId in EventBase has an init 
+                    // This is handled by deserialization if fields match, 
+                    // but we ensure it here as a fallback since our DTO might use different names.
+                    typeof(EventBase).GetProperty("EventId")?.SetValue(eventToProcess, eventId);
                 }
+
+                if (string.IsNullOrEmpty(eventToProcess.CorrelationId))
+                    eventToProcess = eventToProcess with { CorrelationId = context.TraceIdentifier };
                 
                 enricher.Enrich(eventToProcess, context);
                 
-                // Real-time Fraud Check for Dashboard Feedback
                 var risk = await fraudService.CalculateRiskAsync(eventToProcess);
                 eventToProcess.Metadata["IsSuspicious"] = risk.RiskScore >= 40;
-                eventToProcess.Metadata["RiskScore"] = risk.RiskScore;
+                eventToProcess.Metadata["RiskScore"] = (double)risk.RiskScore;
                 eventToProcess.Metadata["RiskReason"] = (string)risk.Reason;
                 
                 await producer.PublishAsync(eventToProcess, ct);

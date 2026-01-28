@@ -217,6 +217,7 @@ var app = builder.Build();
 
 // 3. Pipeline
 app.UseRateLimiting(); // Rate limiting first - reject early before processing
+app.UseApiKey();         // Followed by Auth
 app.UseMiddleware<CorrelationIdMiddleware>();
 app.UseCors(policy => policy.AllowAnyOrigin().AllowAnyMethod().AllowAnyHeader()); // Enable CORS for Dashboard
 app.UseSerilogRequestLogging();

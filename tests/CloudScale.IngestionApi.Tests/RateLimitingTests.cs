@@ -130,7 +130,7 @@ public class RateLimitingTests
         }
     }
 
-    private static HttpContext CreateHttpContext(string clientIp, string path = "/api/events")
+    private static HttpContext CreateHttpContext(string clientIp, string path = "/api/ingest")
     {
         var context = new DefaultHttpContext();
         context.Request.Path = path;
