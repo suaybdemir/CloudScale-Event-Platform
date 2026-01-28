@@ -2,6 +2,7 @@ using Microsoft.Extensions.Logging;
 using CloudScale.Shared.Events;
 using Microsoft.Extensions.Caching.Memory;
 using System.Text.Json;
+using Microsoft.Extensions.Caching.Distributed;
 
 namespace CloudScale.Shared.Services;
 
@@ -12,10 +13,10 @@ public interface IFraudDetectionService
 
 public class FraudDetectionService : IFraudDetectionService
 {
-    private readonly IMemoryCache _cache;
+    private readonly IDistributedCache _cache;
     private readonly ILogger<FraudDetectionService> _logger;
 
-    public FraudDetectionService(IMemoryCache cache, ILogger<FraudDetectionService> logger)
+    public FraudDetectionService(IDistributedCache cache, ILogger<FraudDetectionService> logger)
     {
         _cache = cache;
         _logger = logger;
@@ -33,11 +34,18 @@ public class FraudDetectionService : IFraudDetectionService
         var userId = @event.UserId ?? "anonymous";
         var pointsKey = $"confidence_points_{userId}";
         
-        var eventCount = _cache.GetOrCreate(pointsKey, entry => {
-            entry.SlidingExpiration = TimeSpan.FromDays(2);
-            return 0;
+        int eventCount = 0;
+        var cachedCount = await _cache.GetStringAsync(pointsKey);
+        if (cachedCount != null && int.TryParse(cachedCount, out var count))
+        {
+            eventCount = count;
+        }
+
+        eventCount++;
+        await _cache.SetStringAsync(pointsKey, eventCount.ToString(), new DistributedCacheEntryOptions
+        {
+            SlidingExpiration = TimeSpan.FromDays(2)
         });
-        _cache.Set(pointsKey, eventCount + 1);
 
         // Confidence = 0.5 + (Min(1.0, eventCount/10.0) * 0.5)
         // Düzeltme: 0.5 taban puan ile başla (Sigmoid-floor). İlk işlemde bile %50 güven.
@@ -93,67 +101,81 @@ public class FraudDetectionService : IFraudDetectionService
         return (finalScore, finalReason);
     }
 
-    private Task<(int Score, string Reason)> CheckVelocityRisk(EventBase @event)
+    private async Task<(int Score, string Reason)> CheckVelocityRisk(EventBase @event)
     {
         var ip = GetMetadata(@event, "ClientIp") ?? "unknown";
         var key = $"fraud_v2_vel_{ip}";
 
-        var count = _cache.GetOrCreate(key, entry =>
+        int count = 0;
+        var cachedVal = await _cache.GetStringAsync(key);
+        if (cachedVal != null && int.TryParse(cachedVal, out var c))
         {
-            entry.AbsoluteExpirationRelativeToNow = TimeSpan.FromMinutes(1);
-            return 0;
+            count = c;
+        }
+
+        count++;
+        await _cache.SetStringAsync(key, count.ToString(), new DistributedCacheEntryOptions
+        {
+            AbsoluteExpirationRelativeToNow = TimeSpan.FromMinutes(1)
         });
 
-        _cache.Set(key, count + 1, TimeSpan.FromMinutes(1));
-
-        if (count > 50) return Task.FromResult((80, "Extreme Velocity Burst"));
-        if (count > 20) return Task.FromResult((40, "High Request Rate"));
+        if (count > 50) return (80, "Extreme Velocity Burst");
+        if (count > 20) return (40, "High Request Rate");
         
-        return Task.FromResult((0, ""));
+        return (0, "");
     }
 
-    private Task<(int Score, string Reason)> CheckImpossibleTravel(EventBase @event)
+    private async Task<(int Score, string Reason)> CheckImpossibleTravel(EventBase @event)
     {
         var userId = @event.UserId;
-        if (string.IsNullOrEmpty(userId)) return Task.FromResult((0, ""));
+        if (string.IsNullOrEmpty(userId)) return (0, "");
 
         var location = GetMetadata(@event, "Location");
-        if (string.IsNullOrEmpty(location)) return Task.FromResult((0, ""));
+        if (string.IsNullOrEmpty(location)) return (0, "");
 
         var key = $"fraud_v2_travel_{userId}";
-        if (_cache.TryGetValue(key, out string? lastLocation))
+        var lastLocation = await _cache.GetStringAsync(key);
+
+        if (lastLocation != null)
         {
             if (lastLocation != location && lastLocation != "Internal" && location != "Internal")
             {
                 // Different locations in < 1 min == Impossible Travel
-                return Task.FromResult((60, $"Impossible Travel: {lastLocation} -> {location}"));
+                return (60, $"Impossible Travel: {lastLocation} -> {location}");
             }
         }
 
-        _cache.Set(key, location, TimeSpan.FromMinutes(5));
-        return Task.FromResult((0, ""));
+        await _cache.SetStringAsync(key, location!, new DistributedCacheEntryOptions
+        {
+            AbsoluteExpirationRelativeToNow = TimeSpan.FromMinutes(5)
+        });
+        return (0, "");
     }
 
-    private Task<(int Score, string Reason)> CheckPatternAnomaly(EventBase @event)
+    private async Task<(int Score, string Reason)> CheckPatternAnomaly(EventBase @event)
     {
         // Dummy pattern: Device switching
         var userId = @event.UserId;
-        if (string.IsNullOrEmpty(userId)) return Task.FromResult((0, ""));
+        if (string.IsNullOrEmpty(userId)) return (0, "");
 
         var device = GetMetadata(@event, "DeviceType");
+        if (string.IsNullOrEmpty(device)) return (0, "");
+
         var key = $"fraud_v2_device_{userId}";
 
-        if (_cache.TryGetValue(key, out string? lastDevice))
+        var lastDevice = await _cache.GetStringAsync(key);
+        if (lastDevice != null)
         {
             if (lastDevice != device)
             {
-                 _cache.Set(key, device, TimeSpan.FromHours(1));
-                 return Task.FromResult((15, $"New Device Architecture Detected: {device}"));
+                 // Update cache with new device
+                 await _cache.SetStringAsync(key, device!, new DistributedCacheEntryOptions { AbsoluteExpirationRelativeToNow = TimeSpan.FromHours(1) });
+                 return (15, $"New Device Architecture Detected: {device}");
             }
         }
 
-        _cache.Set(key, device, TimeSpan.FromHours(24));
-        return Task.FromResult((0, ""));
+        await _cache.SetStringAsync(key, device!, new DistributedCacheEntryOptions { AbsoluteExpirationRelativeToNow = TimeSpan.FromHours(24) });
+        return (0, "");
     }
 
     private string? GetMetadata(EventBase @event, string key)

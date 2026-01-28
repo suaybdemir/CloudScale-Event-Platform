@@ -10,6 +10,7 @@
     <PackageReference Include="Azure.Monitor.OpenTelemetry.Exporter" Version="1.*" />
     <PackageReference Include="FluentValidation.DependencyInjectionExtensions" Version="12.1.1" />
     <PackageReference Include="Microsoft.Azure.Cosmos" Version="3.57.0" />
+    <PackageReference Include="Microsoft.Extensions.Caching.StackExchangeRedis" Version="10.0.2" />
     <PackageReference Include="Newtonsoft.Json" Version="13.0.4" />
     <PackageReference Include="OpenTelemetry.Exporter.OpenTelemetryProtocol" Version="1.*" />
     <PackageReference Include="OpenTelemetry.Extensions.Hosting" Version="1.*" />

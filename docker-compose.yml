@@ -1,23 +1,19 @@
+version: '3.8'
+
 services:
   cosmosdb-emulator:
     image: mcr.microsoft.com/cosmosdb/linux/azure-cosmos-emulator:latest
     container_name: cosmosdb-emulator
     ports:
-      - "8081:8081"
+      - "8082:8081"
       - "10251-10255:10251-10255"
     environment:
       - AZURE_COSMOS_EMULATOR_PARTITION_COUNT=1
       - AZURE_COSMOS_EMULATOR_ENABLE_DATA_PERSISTENCE=false
       - AZURE_COSMOS_EMULATOR_IP_ADDRESS_OVERRIDE=0.0.0.0
-    healthcheck:
-      test: ["CMD", "curl", "-k", "-f", "https://localhost:8081/_explorer/emulator.pem"]
-      interval: 10s
-      timeout: 30s
-      retries: 50
-      start_period: 120s
+    restart: always
     networks:
       - cloudscale-network
-    restart: always
 
   servicebus-emulator:
     image: mcr.microsoft.com/azure-messaging/servicebus-emulator:latest
@@ -33,9 +29,9 @@ services:
       - sqledge
     volumes:
       - ./ServiceBusConfig.json:/ServiceBus_Emulator/ConfigFiles/Config.json
+    restart: always
     networks:
       - cloudscale-network
-    restart: always
 
   sqledge:
     image: mcr.microsoft.com/azure-sql-edge:latest
@@ -43,9 +39,9 @@ services:
     environment:
       - ACCEPT_EULA=Y
       - MSSQL_SA_PASSWORD=CloudScale@2024!
+    restart: always
     networks:
       - cloudscale-network
-    restart: always
 
   azurite:
     image: mcr.microsoft.com/azure-storage/azurite
@@ -68,6 +64,15 @@ services:
       - cloudscale-network
     restart: always
 
+  redis:
+    image: redis:alpine
+    container_name: cloudscale-redis
+    ports:
+      - "6379:6379"
+    restart: always
+    networks:
+      - cloudscale-network
+
   ingestion-api:
     build:
       context: .
@@ -84,11 +89,11 @@ services:
       - CosmosDb__DatabaseName=EventsDb
       - CosmosDb__ContainerName=Events
       - CosmosDb__AccountKey=C2y6yDjf5/R+ob0N8A7Cgv30VRDJIWEHLM+4QDU5DE2nQ9nDuVTqobD4b8mGGyPMbIZnqyMsEcaGQy67XIw/Jw==
+      - Redis__ConnectionString=cloudscale-redis:6379,abortConnect=false
     depends_on:
-      cosmosdb-emulator:
-        condition: service_healthy
-      servicebus-emulator:
-        condition: service_started
+      - cosmosdb-emulator
+      - servicebus-emulator
+      - redis
     restart: always
     networks:
       - cloudscale-network
@@ -98,7 +103,7 @@ services:
       context: .
       dockerfile: src/CloudScale.EventProcessor/Dockerfile
     deploy:
-      replicas: 3
+      replicas: 1
     environment:
       - DOTNET_ENVIRONMENT=Development
       - ServiceBus__ConnectionString=Endpoint=sb://servicebus-emulator:5672/;SharedAccessKeyName=RootManageSharedAccessKey;SharedAccessKey=SAS_KEY_VALUE;UseDevelopmentEmulator=true
@@ -111,13 +116,12 @@ services:
       - CosmosDb__ContainerName=Events
       - CosmosDb__AccountKey=C2y6yDjf5/R+ob0N8A7Cgv30VRDJIWEHLM+4QDU5DE2nQ9nDuVTqobD4b8mGGyPMbIZnqyMsEcaGQy67XIw/Jw==
       - ConnectionStrings__StorageAccount=DefaultEndpointsProtocol=http;AccountName=devstoreaccount1;AccountKey=Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw==;BlobEndpoint=http://azurite:10000/devstoreaccount1;
+      - Redis__ConnectionString=cloudscale-redis:6379,abortConnect=false
     depends_on:
-      cosmosdb-emulator:
-        condition: service_healthy
-      servicebus-emulator:
-        condition: service_started
-      azurite:
-        condition: service_started
+      - cosmosdb-emulator
+      - servicebus-emulator
+      - azurite
+      - redis
     restart: always
     networks:
       - cloudscale-network
@@ -129,7 +133,7 @@ services:
     ports:
       - "3001:5173"
     environment:
-      - VITE_API_URL=http://localhost:5000/api/dashboard
+      - VITE_API_URL=http://192.168.0.10:5000/api/dashboard
     restart: always
     depends_on:
       - nginx

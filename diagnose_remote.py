@@ -16,6 +16,16 @@ def diagnose():
         ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
         ssh.connect(HOST, username=USER, password=PASS)
         
+        # 0. Check Port Usage
+        print("\n--- Port 8081 Usage ---")
+        out, _ = run_cmd(ssh, "sudo lsof -i :8081")
+        print(out)
+
+        # 0. Check System Resources
+        print("\n--- System Info ---")
+        out, _ = run_cmd(ssh, "uname -m && free -m")
+        print(out)
+
         # 1. Container Status
         print("\n--- Docker PS (All) ---")
         out, err = run_cmd(ssh, "docker ps -a --format 'table {{.Names}}\t{{.Status}}\t{{.Image}}'")
@@ -38,6 +48,12 @@ def diagnose():
         if ingestion_api:
             # Existing logs...
             
+            print(f"\n--- Ingestion API Stats ({ingestion_api}) ---")
+            # Check for thread starvation or redis timeouts
+            cmd = f"docker logs {ingestion_api} 2>&1 | grep -E 'ThreadPool|RedisTimeout|Busy|Slow|fail' | tail -n 20"
+            out, _ = run_cmd(ssh, cmd)
+            print(out)
+
             print("\n--- Live Alerts API Response ---")
             out, _ = run_cmd(ssh, f"docker exec {ingestion_api} curl -s http://localhost:8080/api/dashboard/alerts")
             print(out)

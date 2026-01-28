@@ -79,7 +79,25 @@ builder.Services.AddOpenTelemetry()
 // Core Services
 builder.Services.AddCors();
 builder.Services.AddScoped<IEventEnrichmentService, EventEnrichmentService>();
-builder.Services.AddMemoryCache();
+builder.Services.AddScoped<IEventEnrichmentService, EventEnrichmentService>();
+
+// Cache Registration (Redis or Memory)
+var redisConnection = builder.Configuration["Redis:ConnectionString"];
+if (!string.IsNullOrEmpty(redisConnection) && redisConnection != "mock")
+{
+    Log.Information("Using Redis Distributed Cache: {Connection}", redisConnection);
+    builder.Services.AddStackExchangeRedisCache(options =>
+    {
+        options.Configuration = redisConnection;
+        options.InstanceName = "CloudScaleInst:";
+    });
+}
+else
+{
+    Log.Warning("Redis ConnectionString missing or mock. Using InMemory Distributed Cache.");
+    builder.Services.AddDistributedMemoryCache();
+}
+
 builder.Services.AddSingleton<CloudScale.Shared.Services.IFraudDetectionService, CloudScale.Shared.Services.FraudDetectionService>();
 builder.Services.AddSingleton<IStatsService, InMemoryStatsService>();
 builder.Services.AddHttpClient(); 
@@ -100,15 +118,14 @@ builder.Services.AddSingleton<Microsoft.Azure.Cosmos.CosmosClient>(sp =>
     var endpoint = config["CosmosDb:Endpoint"];
     var env = sp.GetRequiredService<IHostEnvironment>();
     
-    Log.Information("Initializing CosmosClient with Endpoint: {Endpoint}", endpoint);
-    
     // Check for mocking or fallback
-    if (string.IsNullOrEmpty(endpoint)) 
+    if (string.IsNullOrEmpty(endpoint) || string.Equals(endpoint, "mock", StringComparison.OrdinalIgnoreCase)) 
     {
-        Log.Warning("CosmosDb:Endpoint is missing. CosmosClient will be null.");
-        return null!;
+        Log.Warning("CosmosDb:Endpoint is missing or 'mock'. CosmosClient will be null.");
+        return null!; // Dangerous if injected.
     }
     
+    Log.Information("Initializing CosmosClient with Endpoint: {Endpoint}", endpoint);
     var accountKey = config["CosmosDb:AccountKey"];
     
     var cosmosClientOptions = new Microsoft.Azure.Cosmos.CosmosClientOptions
@@ -117,7 +134,6 @@ builder.Services.AddSingleton<Microsoft.Azure.Cosmos.CosmosClient>(sp =>
         RequestTimeout = TimeSpan.FromMinutes(5),
         MaxRetryAttemptsOnRateLimitedRequests = 10,
         MaxRetryWaitTimeOnRateLimitedRequests = TimeSpan.FromSeconds(60),
-        // LimitToEndpoint = true // Prevent redirects that may cause issues
     };
 
     // Development: Bypass SSL for emulator (self-signed cert)
@@ -131,7 +147,6 @@ builder.Services.AddSingleton<Microsoft.Azure.Cosmos.CosmosClient>(sp =>
                 SslOptions = new System.Net.Security.SslClientAuthenticationOptions
                 {
                     RemoteCertificateValidationCallback = (sender, cert, chain, errors) => true,
-                    // Allow ANY protocol
                     EnabledSslProtocols = System.Security.Authentication.SslProtocols.None 
                 },
                 PooledConnectionLifetime = TimeSpan.FromMinutes(10),

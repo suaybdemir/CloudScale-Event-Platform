@@ -20,6 +20,16 @@ var names = {
   frontDoorProfile: 'fd-cloudscale-${environmentName}-${uniqueSuffix}'
   frontDoorEndpoint: 'fde-cloudscale-${environmentName}-${uniqueSuffix}'
   synapseWorkspace: 'syn-cloudscale-${environmentName}-${uniqueSuffix}'
+  redis: 'redis-cloudscale-${environmentName}-${uniqueSuffix}'
+}
+
+// 0. Redis Cache
+module redis 'modules/redis.bicep' = {
+  name: 'redisDeploy'
+  params: {
+    location: location
+    redisName: names.redis
+  }
 }
 
 // 1. Key Vault

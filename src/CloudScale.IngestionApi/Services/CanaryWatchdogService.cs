@@ -46,7 +46,17 @@ public class CanaryWatchdogService : BackgroundService
     private async Task RunCanaryValidationAsync()
     {
         var client = _httpClientFactory.CreateClient();
-        client.BaseAddress = new Uri("http://localhost:8080"); // Internal call to self
+        
+        // Get URL from Config or default to localhost (Docker service name or localhost)
+        // In Docker, it might be http://ingestion-api:8080
+        var baseUrl = "http://localhost:8080"; 
+        
+        // Check environment variable or configuration (Not injected in constructor to keep plain, but can use IConfiguration if needed)
+        // Simplification: We assume localhost for now, but in Prod this should be the LoadBalancer URL.
+        // Let's rely on standard config if available? But the service is inside the API itself calling itself?
+        // If inside the API, localhost is fine. If this moves to a separate worker, it needs a URL.
+        
+        client.BaseAddress = new Uri(baseUrl); 
 
         // 1. Inject "Conscious Fraud" (Known Attacker IP)
         // Note: In a real system, the FraudDetectionService should have a specific rule for this IP

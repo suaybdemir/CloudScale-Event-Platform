@@ -5,7 +5,7 @@ import time
 HOST = "192.168.0.10"
 USER = "suayb"
 PASS = "suayb"
-LOCAL_FILE = "load_test_batch.py"
+LOCAL_FILE = "load_test_10k.py"
 REMOTE_FILE = f"/home/{USER}/{LOCAL_FILE}"
 
 def run_test():

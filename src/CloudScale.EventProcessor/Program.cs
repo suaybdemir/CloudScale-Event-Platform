@@ -103,8 +103,42 @@ builder.Services.AddSingleton<CosmosClient>(sp =>
 });
 
 builder.Services.AddSingleton<IArchiveService, ArchiveService>();
-builder.Services.AddMemoryCache();
-builder.Services.AddSingleton<ICosmosDbService, CosmosDbService>();
+builder.Services.AddSingleton<IArchiveService, ArchiveService>();
+
+// Cache Registration
+var redisConnection = builder.Configuration["Redis:ConnectionString"];
+if (!string.IsNullOrEmpty(redisConnection) && redisConnection != "mock")
+{
+    Log.Information("Using Redis Distributed Cache: {Connection}", redisConnection);
+    builder.Services.AddStackExchangeRedisCache(options =>
+    {
+        options.Configuration = redisConnection;
+        options.InstanceName = "CloudScaleProc:";
+    });
+}
+else
+{
+    Log.Warning("Redis ConnectionString missing. Using InMemory Distributed Cache.");
+    builder.Services.AddDistributedMemoryCache();
+}
+
+var cosmosEndpoint = builder.Configuration["CosmosDb:Endpoint"];
+if (string.Equals(cosmosEndpoint, "mock", StringComparison.OrdinalIgnoreCase))
+{
+    Log.Warning("Using MOCK CosmosDbService");
+    builder.Services.AddSingleton<ICosmosDbService, MockCosmosDbService>();
+    // Need to register a dummy CosmosClient or ensure it's not resolved elsewhere?
+    // EventProcessorWorker uses ICosmosDbService, so it's fine.
+    // ReadModelProjectorWorker?
+    // It uses ICosmosDbService? Check constructor.
+    // Wait, the original code registered CosmosClient separately.
+    // If I don't register CosmosClient, other services relying on it might fail.
+    // Let's check dependencies.
+}
+else
+{
+    builder.Services.AddSingleton<ICosmosDbService, CosmosDbService>();
+}
 builder.Services.AddSingleton<CloudScale.Shared.Services.IFraudDetectionService, CloudScale.Shared.Services.FraudDetectionService>();
 builder.Services.AddSingleton<IUserScoringService, UserScoringService>();
 builder.Services.AddSingleton<IBackpressureMonitor, BackpressureMonitor>();

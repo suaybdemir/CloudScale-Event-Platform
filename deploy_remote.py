@@ -67,8 +67,6 @@ def deploy():
         if stdout.channel.recv_exit_status() != 0:
             compose_cmd = "docker-compose"
         
-        # DOWN old - SKIPPED to keep Cosmos warm
-        # print(f"   Stopping old containers...")
         # run_sudo_command(ssh, f"cd {REMOTE_PATH} && {compose_cmd} down", PASS)
         
         # UP new
