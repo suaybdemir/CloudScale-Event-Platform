@@ -54,7 +54,7 @@ graph TD
     Client -->|HTTP POST JSON| Nginx
     Nginx -->|Proxy Pass| API
     API -->|1. Validate & Auth| Redis
-    API -->|2. Sync Publish (AMQP)| SB_Emulator
+    API -->|2. Sync Publish AMQP| SB_Emulator
     
     SB_Emulator -->|Push/Pull Batch| Processor
     Processor -->|3. Risk Scoring| Redis
