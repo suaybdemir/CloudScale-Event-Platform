@@ -5,7 +5,7 @@ import uuid
 import json
 from datetime import datetime
 
-URL = "http://localhost:5000/api/events"
+URL = "http://192.168.0.10:5000/api/ingest"
 RPS = 10000  # 10k requests per second
 DURATION = 30  # 30 seconds test
 BATCH_SIZE = 1000  # Process in batches for better control
@@ -13,21 +13,21 @@ BATCH_SIZE = 1000  # Process in batches for better control
 # Event templates for variety
 EVENT_TEMPLATES = [
     {
-        "eventType": "page_view",
+        "type": "page_view",
         "url": "https://example.com/products",
     },
     {
-        "eventType": "user_action",
+        "type": "user_action",
         "actionName": "click_button",
         "actionValue": "add_to_cart"
     },
     {
-        "eventType": "user_action",
+        "type": "user_action",
         "actionName": "add_to_cart",
         "actionValue": "product_123"
     },
     {
-        "eventType": "purchase",
+        "type": "purchase",
         "actionName": "purchase",
         "actionValue": "100.50"
     }
@@ -38,13 +38,21 @@ async def send_event(session, user_id, tenant_id):
     template = EVENT_TEMPLATES[hash(user_id) % len(EVENT_TEMPLATES)]
     event = {
         **template,
+        "specversion": "1.0",
+        "id": str(uuid.uuid4()),
+        "source": "/load/test",
         "tenantId": tenant_id,
         "correlationId": str(uuid.uuid4()),
         "userId": user_id
     }
     
+    headers = {
+        "X-Api-Key": "dev-secret-key",
+        "Content-Type": "application/json"
+    }
+    
     try:
-        async with session.post(URL, json=event, timeout=aiohttp.ClientTimeout(total=10)) as response:
+        async with session.post(URL, json=event, headers=headers, timeout=aiohttp.ClientTimeout(total=10)) as response:
             return {
                 'status': response.status,
                 'success': response.status == 202
