@@ -1,6 +1,6 @@
 # ☁️ CloudScale Event Intelligence Platform - Project Details
 
-![System Architecture](images/system_architecture_diagram.png)
+<img src="images/system_architecture_diagram.png" alt="System Architecture" width="800"/>
 
 This document serves as the **Operational and Technical Manifest** for the CloudScale Platform. It details the project identity, verified capabilities, and technical mandates.
 
@@ -95,9 +95,9 @@ Below are real-time captures from the running Reference Implementation.
 
 ### A. Live Telemetry
 **Figure 1**: System handling traffic. Displays Queue Depth (0 implies healthy consumption), Throughput (Events/Sec), and p99 Latency.
-![Dashboard Live Overview](images/dashboard_overview.png)
+<img src="images/dashboard_overview.png" alt="Dashboard Live Overview" width="800"/>
 
 ### B. Persistence Verification
 **Figure 2**: Data Consistency Check. This view compares the "API Accepted" state vs "Cosmos DB Persisted" state to prove zero data loss.
-![Dashboard Database Verification](images/dashboard_verification.png)
+<img src="images/dashboard_verification.png" alt="Dashboard Database Verification" width="800"/>
 

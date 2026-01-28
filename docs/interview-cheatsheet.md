@@ -35,25 +35,23 @@ This document summarizes the **"War Stories"** and **"Hard Lessons"** learned du
 
 When the Dashboard shows "0 Events", follow this **Probability-Based Workflow**:
 
-When the Dashboard shows "0 Events", follow this **Probability-Based Workflow**:
-
 ```mermaid
 graph TD
-    Start(Dashboard Shows 0 Events) --> CheckIngest{Throughput > 0?}
+    Start("Dashboard Shows 0 Events") --> CheckIngest{"Throughput > 0?"}
     
-    CheckIngest -- No --> IngestFail[Issue: Ingestion Layer]
-    IngestFail --> CheckNginx[Check Nginx Logs]
-    CheckNginx --> FixGate[Fix Gateway / Firewall]
+    CheckIngest -- No --> IngestFail["Issue: Ingestion Layer"]
+    IngestFail --> CheckNginx["Check Nginx Logs"]
+    CheckNginx --> FixGate["Fix Gateway / Firewall"]
     
-    CheckIngest -- Yes --> CheckQueue{Queue Depth Growing?}
+    CheckIngest -- Yes --> CheckQueue{"Queue Depth Growing?"}
     
-    CheckQueue -- Yes --> ProcFail[Issue: Processing Layer]
-    ProcFail --> CheckProcessorLogs[Check event-processor Logs]
-    CheckProcessorLogs --> SearchCB[Search: 'CircuitBreaker']
-    SearchCB --> FixCosmos[Fix Cosmos DB Cert/Port]
+    CheckQueue -- Yes --> ProcFail["Issue: Processing Layer"]
+    ProcFail --> CheckProcessorLogs["Check event-processor Logs"]
+    CheckProcessorLogs --> SearchCB["Search: 'CircuitBreaker'"]
+    SearchCB --> FixCosmos["Fix Cosmos DB Cert/Port"]
     
-    CheckQueue -- No --> IngestFail2[Issue: Ingestion API]
-    IngestFail2 --> CheckAPI[Check API Logs for 503/429]
+    CheckQueue -- No --> IngestFail2["Issue: Ingestion API"]
+    IngestFail2 --> CheckAPI["Check API Logs for 503/429"]
     
     classDef critical fill:#ffcccc,stroke:#333,stroke-width:2px;
     class ProcFail,IngestFail,IngestFail2 critical;

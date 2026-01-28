@@ -1,17 +1,31 @@
 # ☁️ CloudScale Event Intelligence Platform
 
-**Production-grade, high-throughput event ingestion and real-time analytics system designed for 10k+ events/min with sub-200ms latency.**
+> **High-Throughput Event Ingestion & Real-Time Fraud Detection System**
+> *Designed for 10k+ events/min with sub-200ms latency.*
 
-[![.NET](https://img.shields.io/badge/.NET-10.0-512BD4?logo=dotnet)](https://dotnet.microsoft.com/)
-[![Azure](https://img.shields.io/badge/Azure-Native-0078D4?logo=microsoftazure)](https://azure.microsoft.com/)
-[![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
-[![CI/CD](https://img.shields.io/badge/CI%2FCD-GitHub_Actions-2088FF?logo=githubactions)](/.github/workflows/ci-cd.yml)
+---
+
+<div align="center">
+
+[![.NET 10](https://img.shields.io/badge/.NET-10.0-512BD4?logo=dotnet&style=for-the-badge)](https://dotnet.microsoft.com/)
+[![Azure](https://img.shields.io/badge/Azure-Native-0078D4?logo=microsoftazure&style=for-the-badge)](https://azure.microsoft.com/)
+[![Docker](https://img.shields.io/badge/Docker-Ready-2496ED?logo=docker&style=for-the-badge)](https://www.docker.com/)
+[![License](https://img.shields.io/badge/License-MIT-green.svg?style=for-the-badge)](LICENSE)
+
+</div>
 
 ---
 
 ## 🎯 Mission
 
-Enable enterprises to ingest, process, and analyze millions of user behavior events in real-time with **99.9% availability**, **fraud detection**, and **actionable insights** — all on Azure-native infrastructure.
+Enable enterprises to ingest, process, and analyze **millions of user behavior events** in real-time.
+
+| ⚡ Speed | 🛡️ Security | 📊 Insight |
+|:---:|:---:|:---:|
+| **Sub-200ms** latency | **AI-Driven** Fraud Checking | **Real-time** Analytics |
+| Sync & Async Modes | **Zero-Trust** Architecture | **Hot/Cold** Storage |
+
+---
 
 ---
 
@@ -97,6 +111,29 @@ graph TD
     
     %% Legend
     linkStyle 10,11,12,13 stroke:#D32F2F,stroke-width:3px;
+```
+
+### 🧠 Logic Flow (Sequence)
+
+```mermaid
+sequenceDiagram
+    participant Client
+    participant API as Ingestion API
+    participant Bus as Service Bus
+    participant Worker as Processor
+    participant DB as Cosmos DB
+
+    Client->>API: POST /ingest (Event)
+    API->>Bus: Publish(Topic)
+    API-->>Client: 202 Accepted
+    
+    Bus->>Worker: Subscribe()
+    Worker->>DB: Check Fraud History
+    alt Suspicious
+        Worker->>DB: Flag Event (RiskHigh)
+    else Clean
+        Worker->>DB: Store Event (Hot)
+    end
 ```
 
 ### Component Responsibilities

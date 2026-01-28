@@ -60,12 +60,12 @@ In **Synchronous Mode**, the API holds the connection open until Service Bus ack
 
 ```mermaid
 graph LR
-    subgraph Danger Zone [High Risk]
+    subgraph DangerZone [Danger Zone - High Risk]
         Unbounded[Unbounded Queue]
         Blocking[Bounded + Blocking]
     end
 
-    subgraph Safe Zone [Production Safe]
+    subgraph SafeZone [Safe Zone - Production Safe]
         Dropping[Bounded + Dropping]
         Sync[Synchronous / No Queue]
     end
@@ -76,8 +76,8 @@ graph LR
     Dropping -->|Tradeoff| Loss[Data Loss]
     Sync -->|Tradeoff| Latency[Client Latency]
 
-    style Danger Zone fill:#ffcccc,stroke:#cc0000
-    style Safe Zone fill:#ccffcc,stroke:#006600
+    style DangerZone fill:#ffcccc,stroke:#cc0000
+    style SafeZone fill:#ccffcc,stroke:#006600
     style Sync stroke-width:4px,stroke:#006600
 ```
 
