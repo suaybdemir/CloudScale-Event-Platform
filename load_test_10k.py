@@ -5,10 +5,12 @@ import uuid
 import json
 from datetime import datetime
 
-URL = "http://192.168.0.10:5000/api/ingest"
-RPS = 10000  # 10k requests per second
-DURATION = 30  # 30 seconds test
-BATCH_SIZE = 1000  # Process in batches for better control
+# Configuration
+URL = "http://localhost:5000/api/ingest" # Default to localhost
+API_KEY = "dev-secret-key" # Default key for local dev
+RPS = 1000  # Conservative default
+DURATION = 10  # Short default duration
+BATCH_SIZE = 100
 
 # Event templates for variety
 EVENT_TEMPLATES = [
@@ -47,7 +49,7 @@ async def send_event(session, user_id, tenant_id):
     }
     
     headers = {
-        "X-Api-Key": "dev-secret-key",
+        "X-Api-Key": API_KEY,
         "Content-Type": "application/json"
     }
     
