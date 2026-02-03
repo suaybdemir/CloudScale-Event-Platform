@@ -52,6 +52,7 @@ public class ServiceBusProducerService : IServiceBusProducer, IAsyncDisposable
                         args.AttemptNumber, args.RetryDelay.TotalMilliseconds);
                     return ValueTask.CompletedTask;
                 }
+            })
             // Decision: D005 — Default Circuit Breaker Thresholds
             // Failure Scenario: F003 — False positive risk due to small sample size
             // WARNING: 10 calls minimum + 50% failure = 5 failures to trip.
