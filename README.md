@@ -168,6 +168,17 @@ Real-time analysis of user behavior velocity.
 *   Rule: >10 requests/minute from same IP → **Flag as Suspicious**.
 *   Process: Marked events are stored safely but trigger security alerts.
 
+### 4. Engineering Documentation
+
+> **Architectural decisions and failure scenarios are explicitly mapped to code-level enforcement.** Design intent survives implementation.
+
+| Document | Purpose |
+|----------|---------|
+| [`docs/architecture.md`](docs/architecture.md) | System scope, trade-offs, known unknowns |
+| [`docs/decision-log.md`](docs/decision-log.md) | Why each decision was made, alternatives rejected |
+| [`docs/decision-to-code.md`](docs/decision-to-code.md) | Decision → Code anchors (line-level) |
+| [`docs/failure-scenarios.md`](docs/failure-scenarios.md) | Failure playbooks with code breakpoints |
+
 ---
 
 ## 🛠️ Technical Stack
