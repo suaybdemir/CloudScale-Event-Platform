@@ -13,6 +13,14 @@ public interface IBackpressureMonitor
     int RecommendedConcurrency { get; }
 }
 
+/// <summary>
+/// Decision: D001 — Backpressure Strategy (Part of Service Bus over Kafka decision)
+/// This component monitors queue depth and propagates backpressure to API layer via Cosmos.
+/// 
+/// KNOWN ISSUE: Backpressure signal writes to Cosmos (UpdateSystemHealthAsync).
+/// If Cosmos is under RU pressure (F001), the health write may fail or delay.
+/// Control-plane isolation is DEFERRED — see docs/decision-to-code.md#d001
+/// </summary>
 public class BackpressureMonitor : BackgroundService, IBackpressureMonitor
 {
     private readonly ICosmosDbService _cosmosService;
@@ -21,7 +29,8 @@ public class BackpressureMonitor : BackgroundService, IBackpressureMonitor
     private readonly string _queueName;
     private readonly ServiceBusAdministrationClient? _adminClient;
     
-    // Thresholds
+    // Decision: D001 — Hardcoded thresholds (runtime change requires redeploy)
+    // These values are empirical, not load-tested beyond 5K events/sec
     private const long LowPressureThreshold = 1000;    // Normal operation
     private const long MediumPressureThreshold = 5000;  // Start reducing concurrency
     private const long HighPressureThreshold = 10000;   // Critical - minimum concurrency

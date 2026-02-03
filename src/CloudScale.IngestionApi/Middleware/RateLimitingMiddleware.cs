@@ -4,8 +4,15 @@ using System.Threading.RateLimiting;
 namespace CloudScale.IngestionApi.Middleware;
 
 /// <summary>
+/// Decision: D001 — Backpressure Strategy (Ingress Protection)
+/// Failure Scenario: F002 — Service Bus ceiling mitigation via ingress shedding
+/// 
 /// Rate limiting middleware using Token Bucket (per-IP) + Sliding Window (global).
 /// Returns 429 Too Many Requests with Retry-After header when limits exceeded.
+/// 
+/// This is the FIRST LINE OF DEFENSE against F002 (Service Bus throughput ceiling).
+/// Without this, Service Bus saturation causes thread pool exhaustion.
+/// See: docs/decision-to-code.md#d001, docs/failure-scenarios.md#f002
 /// </summary>
 public class RateLimitingMiddleware
 {

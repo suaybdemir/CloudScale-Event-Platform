@@ -27,7 +27,11 @@ public class CosmosDbService : ICosmosDbService
         var config = settings.Value;
         _container = cosmosClient.GetContainer(config.DatabaseName, config.ContainerName);
         
-        // Polly retry pipeline for transient Cosmos errors
+        // Decision: D005 — Circuit Breaker Strategy
+        // WARNING: This pipeline has RETRY ONLY, NO CIRCUIT BREAKER.
+        // Failure Scenario: F001 — RU exhaustion retries accelerate cascade instead of failing fast.
+        // Production deployment MUST add .AddCircuitBreaker() after .AddRetry().
+        // See: docs/decision-to-code.md#d005
         _resiliencePipeline = new ResiliencePipelineBuilder()
             .AddRetry(new RetryStrategyOptions
             {
@@ -71,10 +75,13 @@ public class CosmosDbService : ICosmosDbService
                 await _container.CreateItemAsync<dynamic>(document, new PartitionKey(document.PartitionKey), cancellationToken: token);
                 _logger.LogInformation("Saved event {EventId} to Cosmos DB", @event.EventId);
             }
+            // Decision: D004 — Idempotency at Consumer Level
+            // Failure Scenario: F004 — Idempotency Key Collision
+            // This catch block is the ONLY protection against silent data loss from ID collisions.
+            // LogCritical below is the first signal — it MUST trigger alerts in production.
             catch (CosmosException ex) when (ex.StatusCode == System.Net.HttpStatusCode.Conflict)
             {
-                // Principal Safeguard: 2-step Idempotency Validation
-                // 1. Fetch the existing record to compare payloads
+                // 2-step Idempotency Validation: fetch existing, compare PayloadHash
                 var existing = await _container.ReadItemAsync<CosmosEventDocument>(document.id, new PartitionKey(document.PartitionKey), cancellationToken: token);
                 
                 if (existing.Resource.EventData.PayloadHash != @event.PayloadHash)
@@ -142,13 +149,17 @@ public record CosmosEventDocument
     [JsonPropertyName("ttl")]
     public int TimeToLive { get; init; } = 2592000; // 30 days
 
+    // Decision: D003a — Time-Based Partition Key Selection
+    // Decision: D003b — Hot Partition Mitigation (EXPLICITLY UNIMPLEMENTED)
+    // Failure Scenario: F001 — All monthly traffic hits same partition, causing RU exhaustion.
+    // Known gap: No per-partition monitoring, no write shedding, no suffix randomization.
+    // See: docs/decision-to-code.md#d003b
     public CosmosEventDocument(EventBase @event)
     {
-        // Use DeduplicationId (Principal-grade) for formal idempotency
-        // Fallback to EventId for legacy/manual events
+        // D004: Idempotency key — collision here causes F004
         id = @event.DeduplicationId ?? @event.EventId; 
         EventData = @event;
-        // Synthetic PK: TenantId:yyyy-MM (Principal-grade Hybrid Partitioning)
+        // D003a: Partition key formula — hot partition risk lives here
         PartitionKey = $"{@event.TenantId}:{@event.CreatedAt:yyyy-MM}";
     }
 }

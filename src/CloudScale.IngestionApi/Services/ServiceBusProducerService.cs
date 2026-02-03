@@ -33,7 +33,11 @@ public class ServiceBusProducerService : IServiceBusProducer, IAsyncDisposable
         
         _sender = _client.CreateSender(queueName);
         
-        // Build Polly resilience pipeline: Retry + Circuit Breaker
+        // Decision: D001 — Azure Service Bus over Apache Kafka
+        // Decision: D005 — Circuit Breaker Strategy (Service Bus side: PROTECTED)
+        // This pipeline has both Retry AND Circuit Breaker.
+        // Compare with CosmosDbService.cs which has Retry ONLY (D005 gap).
+        // See: docs/decision-to-code.md#d001, #d005
         _resiliencePipeline = new ResiliencePipelineBuilder()
             .AddRetry(new RetryStrategyOptions
             {
@@ -48,12 +52,16 @@ public class ServiceBusProducerService : IServiceBusProducer, IAsyncDisposable
                         args.AttemptNumber, args.RetryDelay.TotalMilliseconds);
                     return ValueTask.CompletedTask;
                 }
-            })
+            // Decision: D005 — Default Circuit Breaker Thresholds
+            // Failure Scenario: F003 — False positive risk due to small sample size
+            // WARNING: 10 calls minimum + 50% failure = 5 failures to trip.
+            // GC pause or transient blip can trigger false open. Tuning DEFERRED.
+            // See: docs/failure-scenarios.md#f003
             .AddCircuitBreaker(new CircuitBreakerStrategyOptions
             {
-                FailureRatio = 0.5,
+                FailureRatio = 0.5,                    // 50% failures trigger open
                 SamplingDuration = TimeSpan.FromSeconds(30),
-                MinimumThroughput = 10,
+                MinimumThroughput = 10,                // Small sample — F003 risk
                 BreakDuration = TimeSpan.FromSeconds(30),
                 ShouldHandle = new PredicateBuilder().Handle<ServiceBusException>(),
                 OnOpened = args =>
@@ -112,6 +120,10 @@ public class ServiceBusProducerService : IServiceBusProducer, IAsyncDisposable
             }
         }
 
+        // Decision: D001 — Service Bus vendor lock-in point
+        // Failure Scenario: F002 — Emulator ceiling (~4K msg/sec) breaks here
+        // When SendAsync latency spikes, this is where thread pool backs up.
+        // See: docs/failure-scenarios.md#f002
         await _resiliencePipeline.ExecuteAsync(async token =>
         {
             await _sender.SendMessageAsync(message, token);
